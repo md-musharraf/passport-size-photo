@@ -1,0 +1,365 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg-app: var(--bg-app);
+  --color-panel-app: var(--panel-app);
+  --color-card-app: var(--card-app);
+  --color-accent-app: var(--accent-app);
+  --color-accent-hover: var(--accent-hover);
+  --color-success-app: var(--success-app);
+  --color-danger-app: var(--danger-app);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-border-app: var(--border-app);
+}
+
+:root {
+  /* Cooler, deeper neutral ramp for cleaner elevation separation (GitHub-like). */
+  --bg-app: #16161A;
+  --panel-app: #1F1F25;
+  --card-app: #2C2C34;
+  --accent-app: #EA580C;
+  --accent-hover: #F97316;
+  --success-app: #16A34A;
+  --danger-app: #EF4444;
+  --text-primary: #FAFAFA;
+  --text-secondary: #A1A1AA;
+  --border-app: #3A3A44;
+
+  /* Elevation scale — one shared shadow language across every surface. */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 12px 32px -6px rgba(0, 0, 0, 0.55);
+  --shadow-glow: 0 6px 20px -4px rgba(234, 88, 12, 0.45);
+  --ring-accent: 0 0 0 3px rgba(234, 88, 12, 0.35);
+
+  /* Radius scale. */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+
+  --font-size-heading: 22px;
+  --font-size-section: 18px;
+  --font-size-button: 16px;
+  --font-size-label: 15px;
+  --font-size-input: 15px;
+}
+
+.light {
+  --bg-app: #F4F4F5;
+  --panel-app: #FAFAFA;
+  --card-app: #FFFFFF;
+  --accent-app: #EA580C;
+  --accent-hover: #C2410C;
+  --success-app: #16A34A;
+  --danger-app: #DC2626;
+  --text-primary: #18181B;
+  --text-secondary: #71717A;
+  --border-app: #E4E4E7;
+
+  --shadow-sm: 0 1px 2px rgba(24, 24, 27, 0.08);
+  --shadow-md: 0 4px 12px -2px rgba(24, 24, 27, 0.12);
+  --shadow-lg: 0 12px 32px -6px rgba(24, 24, 27, 0.18);
+  --shadow-glow: 0 6px 20px -4px rgba(234, 88, 12, 0.30);
+  --ring-accent: 0 0 0 3px rgba(234, 88, 12, 0.25);
+}
+
+/* Base Body Styles */
+body {
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+  margin: 0;
+  padding: 0;
+}
+
+/* Global Typography Classes based on specifications */
+.app-heading {
+  font-size: 22px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.025em;
+  color: var(--text-primary);
+}
+
+.app-section-title {
+  font-size: 18px !important;
+  font-weight: 600 !important;
+  color: var(--text-primary);
+}
+
+.app-button-text {
+  font-size: 16px !important;
+  font-weight: 600 !important;
+}
+
+.app-label {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: var(--text-secondary);
+}
+
+.app-input {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  background-color: var(--card-app);
+  border: 1px solid var(--border-app);
+  color: var(--text-primary);
+}
+
+/* Custom layout container helper to ensure no page scrolling */
+.app-viewport {
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Button default design system */
+.studio-btn {
+  min-height: 48px;
+  border-radius: var(--radius-md);
+  font-size: 16px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  transition: transform 0.12s ease, background-color 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  cursor: pointer;
+  border: 1px solid transparent;
+  user-select: none;
+}
+
+.studio-btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.99);
+}
+
+.studio-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-accent);
+}
+
+.studio-btn-primary {
+  background-color: var(--accent-app);
+  color: #FFFFFF;
+  box-shadow: var(--shadow-glow);
+}
+
+.studio-btn-primary:hover:not(:disabled) {
+  background-color: var(--accent-hover);
+  transform: translateY(-1px);
+}
+
+.studio-btn-secondary {
+  background-color: var(--card-app);
+  color: var(--text-primary);
+  border-color: var(--border-app);
+}
+
+.studio-btn-secondary:hover:not(:disabled) {
+  background-color: var(--border-app);
+  border-color: var(--text-secondary);
+}
+
+.studio-btn-success {
+  background-color: var(--success-app);
+  color: #FFFFFF;
+}
+
+.studio-btn-success:hover:not(:disabled) {
+  background-color: #15803d;
+}
+
+.studio-btn-danger {
+  background-color: var(--danger-app);
+  color: #FFFFFF;
+}
+
+.studio-btn-danger:hover:not(:disabled) {
+  background-color: #b91c1c;
+}
+
+.studio-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Accordion design matches panels */
+.studio-accordion-header {
+  background-color: var(--panel-app);
+  border-bottom: 1px solid var(--border-app);
+}
+
+/* Custom range inputs - Styled beautifully with Amber accent */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--border-app);
+  height: 6px;
+  border-radius: 9999px;
+  outline: none;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent-app);
+  border: 2px solid var(--panel-app);
+  cursor: pointer;
+  transition: all 0.1s ease-in-out;
+}
+
+input[type='range']::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  background: var(--accent-hover);
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent-app);
+  border: 2px solid var(--panel-app);
+  cursor: pointer;
+  transition: all 0.1s ease-in-out;
+}
+
+input[type='range']::-moz-range-thumb:hover {
+  transform: scale(1.2);
+  background: var(--accent-hover);
+}
+
+/* Hide scrollbars but keep functionality */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+/* Custom premium scrollbar for panels */
+.panel-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.panel-scrollbar::-webkit-scrollbar-track {
+  background: var(--panel-app);
+}
+.panel-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border-app);
+  border-radius: 4px;
+}
+.panel-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #555555;
+}
+
+/* Biometric compliance pulsing guide overlay */
+@keyframes guide-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.75; }
+}
+.biometric-guide-pulse {
+  animation: guide-pulse 2s infinite ease-in-out;
+}
+
+/* Shimmer buttons for AI status */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.ai-shimmer {
+  background: linear-gradient(90deg, rgba(194, 65, 12, 0.15) 25%, rgba(234, 88, 12, 0.35) 50%, rgba(194, 65, 12, 0.15) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite linear;
+}
+
+/* ==========================================================================
+   Motion system — several of these class names were already used throughout
+   the app but had no keyframes defined, so the intended entrance animations
+   silently did nothing. Defining them here turns them on everywhere at once.
+   ========================================================================== */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes scaleUp {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fadeIn { animation: fadeIn 0.35s ease-out both; }
+.animate-scaleUp { animation: scaleUp 0.28s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.animate-slideUp { animation: slideUp 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
+/* Fallback for the tailwindcss-animate style `animate-in` used in a few places. */
+.animate-in { animation: scaleUp 0.28s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fadeIn, .animate-scaleUp, .animate-slideUp, .animate-in,
+  .ai-shimmer, .biometric-guide-pulse {
+    animation: none !important;
+  }
+}
+
+/* ==========================================================================
+   Surfaces & interaction utilities — shared elevation language.
+   ========================================================================== */
+.glass-card {
+  background: color-mix(in srgb, var(--panel-app) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(1.1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  border: 1px solid var(--border-app);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.elevate-sm { box-shadow: var(--shadow-sm); }
+.elevate-md { box-shadow: var(--shadow-md); }
+.elevate-lg { box-shadow: var(--shadow-lg); }
+
+/* Subtle lift on hover for interactive cards. */
+.hover-lift {
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+  border-color: color-mix(in srgb, var(--accent-app) 45%, var(--border-app));
+}
+
+/* Consistent, accessible keyboard focus for all interactive controls. */
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-accent);
+  border-radius: var(--radius-sm);
+}
+
+/* Inputs get a clean accent ring on focus instead of the default browser glow. */
+input:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent-app);
+  box-shadow: var(--ring-accent);
+}
+
+/* Filled track for range sliders (progress feel) in supporting browsers. */
+input[type='range'] {
+  transition: background 0.1s ease;
+}
+input[type='range']:hover {
+  background: color-mix(in srgb, var(--border-app) 70%, var(--accent-app));
+}
