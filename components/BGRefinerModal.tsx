@@ -611,9 +611,11 @@ export default function BGRefinerModal({
     setPanOffset({ x: newPanX, y: newPanY });
   };
 
-  // Mouse canvas interaction handlers
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Pointer handlers (mouse, touch and pen). Capturing the pointer keeps a
+  // stroke going even if the finger/cursor briefly leaves the canvas.
+  const handleMouseDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!canvasRef.current || !rawMaskCanvasRef.current) return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
@@ -670,7 +672,7 @@ export default function BGRefinerModal({
     }
   };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!canvasRef.current) return;
     
     const canvas = canvasRef.current;
@@ -931,10 +933,11 @@ export default function BGRefinerModal({
           ) : (
             <canvas
               ref={canvasRef}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUpOrLeave}
-              onMouseLeave={handleMouseUpOrLeave}
+              onPointerDown={handleMouseDown}
+              onPointerMove={handleMouseMove}
+              onPointerUp={handleMouseUpOrLeave}
+              onPointerCancel={handleMouseUpOrLeave}
+              onPointerLeave={handleMouseUpOrLeave}
               onWheel={handleWheel}
               onContextMenu={(e) => e.preventDefault()}
               className="absolute inset-0 w-full h-full block touch-none"

@@ -10,9 +10,10 @@ import { FaRuler } from 'react-icons/fa';
 import jsPDF from 'jspdf';
 import { PRESETS, PRESET_PIXELS } from './ImageEditor';
 import { getPreset } from '@/lib/presets';
-import { computePassportAlignment, HEAD_BOX_EXPANSION } from '@/lib/faceAlign';
-import { ensureFaceModels, makeDetectorOptions } from '@/lib/faceModels';
+import { computePassportAlignment } from '@/lib/faceAlign';
+import { analyzeFace } from '@/lib/faceLandmarker';
 import { removeBackground } from './BGRemover';
+import { importImageFile } from '@/lib/imageImport';
 import BatchEditModal from './BatchEditModal';
 
 export interface BatchItem {
@@ -248,8 +249,7 @@ export default function BatchWorkspace({
     try {
       cutoutImage = await removeBackground(
         item.originalImage,
-        'isnet_quint8',
-        'cpu',
+        'auto',
         (p) => updateItem({ status: 'bg-removing', progress: Math.max(5, Math.round(p * 0.9)) }),
       );
       updateItem({ processedImage: cutoutImage, progress: 95 });
@@ -264,45 +264,17 @@ export default function BatchWorkspace({
     updateItem({ status: 'face-detecting', progress: 96 });
 
     try {
-      // 1. Face alignment via face-api.js using originalImage
+      // 1. Face alignment via MediaPipe Face Landmarker
       let faceCropPos = { x: 50, y: 50 };
       let faceCropScale = 100;
       let faceRotation = 0;
 
       try {
-        const faceapi = await import('face-api.js');
-        await ensureFaceModels(faceapi);
-
-        const img = new Image();
-        img.src = item.originalImage;
-        await new Promise((res) => { img.onload = res; });
-
-        const opts = makeDetectorOptions(faceapi);
-        const detections = await faceapi.detectAllFaces(img, opts as any).withFaceLandmarks();
-        const detection = detections && detections.length
-          ? detections.reduce((a, b) => (a.detection.box.area >= b.detection.box.area ? a : b))
-          : null;
-
-        if (detection) {
-          const box = detection.detection.box;
-          const landmarks = detection.landmarks;
-
-          const getCenter = (points: { x: number; y: number }[]) => {
-            const sum = points.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
-            return { x: sum.x / points.length, y: sum.y / points.length };
-          };
-
-          const align = computePassportAlignment({
-            imgW: img.width,
-            imgH: img.height,
-            boxHeight: box.height,
-            faceCenterX: box.x + box.width / 2,
-            leftEye: getCenter(landmarks.getLeftEye()),
-            rightEye: getCenter(landmarks.getRightEye()),
-            preset: getPreset(preset),
-            headBoxExpansion: HEAD_BOX_EXPANSION,
-          });
-
+        // Detect on the cut-out when we have one: its alpha mask gives the
+        // true top of the head for accurate head sizing.
+        const face = await analyzeFace(workingItem.processedImage ?? item.originalImage);
+        if (face) {
+          const align = computePassportAlignment(face, getPreset(preset));
           faceCropPos = { x: align.cropX, y: align.cropY };
           faceCropScale = align.cropScale;
           faceRotation = align.rotationDeg;
@@ -360,6 +332,21 @@ export default function BatchWorkspace({
     }
   };
 
+  // Items can arrive already loaded but unprocessed — e.g. several photos
+  // chosen together on the start screen, or a restored session. Start the AI
+  // pipeline for each of those exactly once (it previously never ran for
+  // them, leaving the queue stuck on "Calibrating face").
+  const startedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const item of batchItems) {
+      if (item.status === 'pending' && item.originalImage && !startedRef.current.has(item.id)) {
+        startedRef.current.add(item.id);
+        triggerItemAI(item);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batchItems]);
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
@@ -392,23 +379,17 @@ export default function BatchWorkspace({
         clothingRotation: 0,
       };
 
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const dataUrl = ev.target?.result as string;
-        onBatchItemsChange(prev => {
-          const matched = prev.map(it => {
-            if (it.id === id) {
-              const updated = { ...it, originalImage: dataUrl };
-              // Trigger async processing
-              triggerItemAI(updated);
-              return updated;
-            }
-            return it;
-          });
-          return matched;
+      // Upright + print-size capped, then run the AI pipeline. The pipeline is
+      // started outside the state updater (updaters must stay side-effect free).
+      importImageFile(file)
+        .then((dataUrl) => {
+          startedRef.current.add(id);
+          onBatchItemsChange(prev => prev.map(it => (it.id === id ? { ...it, originalImage: dataUrl } : it)));
+          triggerItemAI({ ...item, originalImage: dataUrl });
+        })
+        .catch(() => {
+          onBatchItemsChange(prev => prev.map(it => (it.id === id ? { ...it, status: 'error' } : it)));
         });
-      };
-      reader.readAsDataURL(file);
 
       return item;
     });

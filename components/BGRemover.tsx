@@ -1,7 +1,8 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import BGRefinerModal from './BGRefinerModal';
-import { FiChevronDown, FiRefreshCw, FiAlertCircle } from 'react-icons/fi';
+import { FiChevronDown, FiAlertCircle, FiCpu } from 'react-icons/fi';
+import { getDeviceProfile, markGpuFailed } from '@/lib/device';
 import { BsStars } from 'react-icons/bs';
 import { FaPaintBrush } from 'react-icons/fa';
 
@@ -87,39 +88,93 @@ async function prepareInputBlob(imageData: string): Promise<Blob> {
   });
 }
 
-// The @imgly WASM/ONNX session is a single shared resource and is NOT safe to run
-// concurrently — firing several removals at once (e.g. when a user drops multiple
-// photos into the batch, each triggering its own callback) corrupts the session and
-// makes removals silently fail. This global chain serialises every call so they run
-// one after another no matter where they are triggered from.
+// ---------------------------------------------------------------------------
+// Device-aware engine
+// ---------------------------------------------------------------------------
+// One backend decision per app session: WebGPU when the machine has a usable
+// adapter (typically 5-10x faster), otherwise multi-threaded WASM on the CPU.
+// It must be a single decision — onnxruntime-web caches whichever runtime
+// (WebGPU or plain WASM) loads first, so mixing devices across calls (as the
+// app previously did: 'gpu' in some places, 'cpu' in others) was fragile.
+
+export type BgQuality = 'auto' | 'fast' | 'best';
+type ImglyModel = 'isnet' | 'isnet_fp16' | 'isnet_quint8';
+type Device = 'gpu' | 'cpu';
+
+let lockedDevice: Device | null = null;
+let localModelsMissing = false;
+
+async function resolveDevice(): Promise<Device> {
+  if (!lockedDevice) {
+    const profile = await getDeviceProfile();
+    lockedDevice = profile.webgpu ? 'gpu' : 'cpu';
+  }
+  return lockedDevice;
+}
+
+/** fp16 is built for GPUs; the 8-bit quantised model is the fast CPU choice. */
+function modelFor(quality: BgQuality, device: Device): ImglyModel {
+  if (quality === 'best') return 'isnet';
+  return device === 'gpu' ? 'isnet_fp16' : 'isnet_quint8';
+}
+
+/** Human-readable engine description for the UI. */
+export async function describeBackgroundEngine(): Promise<string> {
+  const device = await resolveDevice();
+  const profile = await getDeviceProfile();
+  return device === 'gpu' ? 'GPU accelerated (WebGPU)' : `CPU · ${profile.cores} threads`;
+}
+
+function localPublicPath(): string {
+  return typeof window !== 'undefined'
+    ? `${window.location.origin}/models/background-removal/`
+    : '/models/background-removal/';
+}
+
+// imgly memoises its model session by JSON.stringify(config). Functions are
+// dropped by JSON.stringify, so every call that builds its config here —
+// warm-up included — shares one cached session per (model, device, source).
+function buildConfig(model: ImglyModel, device: Device, useLocal: boolean, progress?: (key: string, current: number, total: number) => void) {
+  return {
+    model,
+    device,
+    ...(useLocal ? { publicPath: localPublicPath() } : {}),
+    output: { format: 'image/png' as const, quality: 1.0 },
+    ...(progress ? { progress } : {}),
+  };
+}
+
+function isResourceError(err: unknown): boolean {
+  const msg = String((err as Error)?.message ?? err);
+  return /fetch|resource|not found|publicPath|network|404/i.test(msg);
+}
+
+// The ONNX session is not safe to run concurrently — overlapping removals
+// (e.g. several photos dropped into the batch at once) corrupt it. This chain
+// serialises every call no matter where it comes from.
 let bgRemovalQueue: Promise<unknown> = Promise.resolve();
 
-// Warm the AI model up once, while the app sits idle, so the very first real
-// cutout doesn't pay the ~20s WASM-compile + model-fetch cost. Safe to call
-// repeatedly — it only ever runs a single preload.
+// Warm the model up once while the app is idle so the first real cut-out
+// doesn't pay the WASM-compile + model-load cost.
 let warmupPromise: Promise<void> | null = null;
-export function warmUpBackgroundModel(
-  modelQuality: 'isnet' | 'isnet_fp16' | 'isnet_quint8' = 'isnet_quint8',
-): Promise<void> {
+export function warmUpBackgroundModel(quality: BgQuality = 'auto'): Promise<void> {
   if (warmupPromise) return warmupPromise;
   warmupPromise = (async () => {
     try {
       const { preload } = await import('@imgly/background-removal');
-      const localPublicPath = typeof window !== 'undefined'
-        ? `${window.location.origin}/models/background-removal/`
-        : '/models/background-removal/';
+      const device = await resolveDevice();
+      const model = modelFor(quality, device);
       try {
-        await preload({ model: modelQuality, publicPath: localPublicPath });
-      } catch {
-        // Local models missing (e.g. running before download) — fall back to the
-        // library default so the warm-up still primes the WASM runtime.
-        await preload({ model: modelQuality });
+        await preload(buildConfig(model, device, !localModelsMissing));
+      } catch (err) {
+        if (localModelsMissing || !isResourceError(err)) throw err;
+        localModelsMissing = true;
+        await preload(buildConfig(model, device, false));
       }
     } catch (err) {
-      // Never let a warm-up failure surface to the user; the real removal path
-      // has its own error handling and CDN fallback.
+      // Never surface warm-up failures; the real call has its own handling.
       console.warn('Background model warm-up skipped:', err);
-      warmupPromise = null; // allow a later retry
+      warmupPromise = null;
     }
   })();
   return warmupPromise;
@@ -127,78 +182,79 @@ export function warmUpBackgroundModel(
 
 export function removeBackground(
   imageData: string,
-  modelQuality: 'isnet' | 'isnet_fp16' | 'isnet_quint8' = 'isnet_quint8',
-  deviceBackend: 'gpu' | 'cpu' = 'cpu',
+  quality: BgQuality = 'auto',
   onProgress?: (progress: number) => void,
-  onStatusChange?: (statusText: string) => void
+  onStatusChange?: (statusText: string) => void,
 ): Promise<string> {
-  const run = bgRemovalQueue.then(() =>
-    removeBackgroundImpl(imageData, modelQuality, deviceBackend, onProgress, onStatusChange)
-  );
-  // Keep the chain alive even if this call rejects, so a single failure never
-  // permanently blocks every subsequent removal.
+  const run = bgRemovalQueue.then(() => removeBackgroundImpl(imageData, quality, onProgress, onStatusChange));
+  // Keep the chain alive even if this call rejects.
   bgRemovalQueue = run.catch(() => undefined);
   return run;
 }
 
 async function removeBackgroundImpl(
   imageData: string,
-  modelQuality: 'isnet' | 'isnet_fp16' | 'isnet_quint8' = 'isnet_quint8',
-  deviceBackend: 'gpu' | 'cpu' = 'cpu',
+  quality: BgQuality,
   onProgress?: (progress: number) => void,
-  onStatusChange?: (statusText: string) => void
+  onStatusChange?: (statusText: string) => void,
 ): Promise<string> {
   const { removeBackground: imglyRemoveBackground } = await import('@imgly/background-removal');
-
-  // Resize oversized inputs before handing them to the model (major speed win).
   const blob = await prepareInputBlob(imageData);
 
-  const localPublicPath = typeof window !== 'undefined'
-    ? `${window.location.origin}/models/background-removal/`
-    : '/models/background-removal/';
+  // Map imgly's per-stage callbacks onto one steadily increasing percentage:
+  // downloads/initialisation fill 0-60%, inference + encode fill 60-100%.
+  let shown = 0;
+  let phase = '';
+  const progress = (key: string, current: number, total: number) => {
+    if (total <= 0) return;
+    const frac = Math.min(1, current / total);
+    const isCompute = key.startsWith('compute');
+    const pct = isCompute ? 60 + frac * 40 : 5 + frac * 55;
+    const nextPhase = isCompute ? 'Removing background…' : 'Loading AI model…';
+    if (nextPhase !== phase) {
+      phase = nextPhase;
+      onStatusChange?.(nextPhase);
+    }
+    if (pct > shown) {
+      shown = pct;
+      onProgress?.(Math.round(pct));
+    }
+  };
+
+  const attempt = async (device: Device) => {
+    const model = modelFor(quality, device);
+    if (!localModelsMissing) {
+      try {
+        return await imglyRemoveBackground(blob, buildConfig(model, device, true, progress));
+      } catch (err) {
+        if (!isResourceError(err)) throw err;
+        localModelsMissing = true;
+        console.warn('Offline background model not found, using the online copy:', err);
+        onStatusChange?.('Downloading AI model (first run only)…');
+      }
+    }
+    return imglyRemoveBackground(blob, buildConfig(model, device, false, progress));
+  };
 
   let outputBlob: Blob;
+  const device = await resolveDevice();
   try {
-    if (onStatusChange) {
-      onStatusChange('Loading local AI model...');
+    outputBlob = await attempt(device);
+  } catch (err) {
+    if (device === 'gpu' && !isResourceError(err)) {
+      // GPU path crashed (driver/adapter quirk): remember it and use the CPU.
+      console.warn('GPU background removal failed, switching to CPU:', err);
+      markGpuFailed();
+      lockedDevice = 'cpu';
+      onStatusChange?.('Switching to CPU processing…');
+      outputBlob = await attempt('cpu');
+    } else if (isResourceError(err)) {
+      throw new Error('The background-removal model is not installed and could not be downloaded. Check your internet connection and try again.');
+    } else {
+      throw err;
     }
-    // Attempt local load first. Use absolute path relative to dev or custom protocol origin
-    outputBlob = await imglyRemoveBackground(blob, {
-      model: modelQuality,
-      publicPath: localPublicPath,
-      device: deviceBackend,
-      output: {
-        format: 'image/png',
-        quality: 1.0,
-      },
-      progress: (key, current, total) => {
-        if (onProgress && total > 0) {
-          onProgress(Math.round((current / total) * 100));
-        }
-      }
-    });
-  } catch (localErr) {
-    console.warn('Local background removal model not found or failed, falling back to CDN:', localErr);
-    if (onStatusChange) {
-      onStatusChange('Local model not found. Fetching from AI cloud CDN...');
-    }
-    // Fallback to default CDN (omit publicPath so it uses library default)
-    outputBlob = await imglyRemoveBackground(blob, {
-      model: modelQuality,
-      device: deviceBackend,
-      output: {
-        format: 'image/png',
-        quality: 1.0,
-      },
-      progress: (key, current, total) => {
-        if (onProgress && total > 0) {
-          onProgress(Math.round((current / total) * 100));
-        }
-      }
-    });
   }
-  
-  // Convert output blob back to base64
+
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => resolve(reader.result as string);
@@ -215,6 +271,12 @@ interface BGRemoverProps {
   setIsProcessing: (processing: boolean) => void;
 }
 
+const QUALITY_OPTIONS: { value: BgQuality; label: string }[] = [
+  { value: 'auto', label: 'Automatic (recommended)' },
+  { value: 'fast', label: 'Fast' },
+  { value: 'best', label: 'Best edges (slower)' },
+];
+
 export default function BGRemover({
   imageData,
   processedImage,
@@ -223,51 +285,36 @@ export default function BGRemover({
   setIsProcessing,
 }: BGRemoverProps) {
   const [progress, setProgress] = useState(0);
-  const [statusText, setStatusText] = useState('Ready to remove background');
+  const [statusText, setStatusText] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [modelQuality, setModelQuality] = useState<'isnet' | 'isnet_fp16' | 'isnet_quint8'>('isnet_quint8');
-  const [deviceBackend, setDeviceBackend] = useState<'gpu' | 'cpu'>('cpu');
+  const [quality, setQuality] = useState<BgQuality>('auto');
+  const [engine, setEngine] = useState<string>('');
   const [isRefinerOpen, setIsRefinerOpen] = useState(false);
 
   const hasAutoRunRef = useRef(false);
   const prevImageDataRef = useRef(imageData);
 
+  useEffect(() => {
+    describeBackgroundEngine().then(setEngine).catch(() => undefined);
+  }, []);
+
   const handleBGRemove = async () => {
     setIsProcessing(true);
     setError(null);
-    setStatusText('Loading AI model...');
-    setProgress(5);
-    
+    setStatusText('Loading AI model…');
+    setProgress(3);
+
     try {
-      const processed = await removeBackground(
-        imageData, 
-        modelQuality, 
-        deviceBackend,
-        (p) => {
-          setProgress(p);
-          if (p < 20) {
-            setStatusText('Initializing AI model...');
-          } else if (p < 60) {
-            setStatusText('Scanning photo...');
-          } else if (p < 90) {
-            setStatusText('Detecting subject contours...');
-          } else {
-            setStatusText('Removing background...');
-          }
-        },
-        (status) => {
-          setStatusText(status);
-        }
-      );
+      const processed = await removeBackground(imageData, quality, setProgress, setStatusText);
       setProgress(100);
-      setStatusText('Background removed successfully!');
       onBGRemoved(processed);
     } catch (err: any) {
       console.error('BG Removal Error:', err);
-      setError(err?.message || 'Failed to remove background. Please try again.');
+      setError(err?.message || 'Could not remove the background. Please try again.');
       setProgress(0);
     } finally {
       setIsProcessing(false);
+      describeBackgroundEngine().then(setEngine).catch(() => undefined);
     }
   };
 
@@ -278,106 +325,99 @@ export default function BGRemover({
     }
   }, [imageData]);
 
+  // Start the cut-out automatically the first time a new photo reaches this step.
   useEffect(() => {
-    if (!processedImage && imageData && imageData !== '' && !isProcessing && !hasAutoRunRef.current) {
+    if (!processedImage && imageData && !isProcessing && !hasAutoRunRef.current) {
       hasAutoRunRef.current = true;
       handleBGRemove();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [processedImage, imageData, isProcessing]);
 
   return (
-    <div className="w-full mt-2 space-y-3">
-      {/* Model Quality Selection */}
+    <div className="w-full space-y-3">
       {!processedImage && (
-        <div className="flex flex-col gap-1">
-          <span className="text-[11px] font-bold text-text-secondary uppercase tracking-wider pl-0.5 select-none">
-            AI Background Cutout Mode
-          </span>
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="bg-quality" className="text-[13px] font-medium text-text-secondary">
+            Cut-out quality
+          </label>
           <div className="relative">
             <select
-              value={modelQuality}
-              onChange={(e) => setModelQuality(e.target.value as any)}
+              id="bg-quality"
+              value={quality}
+              onChange={(e) => setQuality(e.target.value as BgQuality)}
               disabled={isProcessing}
-              className="w-full bg-card-app border border-border-app text-text-primary text-[12.5px] font-bold rounded-xl px-3 py-1.5 outline-none focus:border-accent-app cursor-pointer appearance-none shadow-inner disabled:opacity-50"
+              className="w-full bg-card-app border border-border-app text-text-primary text-[14px] rounded-lg pl-3 pr-8 py-2 outline-none focus:border-accent-app cursor-pointer appearance-none disabled:opacity-50"
             >
-              <option value="isnet_quint8" className="bg-bg-app text-text-primary">
-                Fast Mode (Quick processing, CPU safe)
-              </option>
-              <option value="isnet" className="bg-bg-app text-text-primary">
-                Ultra Mode (Precision edges, CPU safe)
-              </option>
+              {QUALITY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
             </select>
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary">
-              <FiChevronDown className="w-3 h-3" />
-            </div>
+            <FiChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none text-text-secondary" />
           </div>
         </div>
       )}
 
-      {/* Action Buttons */}
       {!processedImage ? (
         <button
+          type="button"
           onClick={handleBGRemove}
           disabled={isProcessing}
-          className={`
-            w-full py-2.5 rounded-xl font-extrabold transition-all text-sm flex items-center justify-center gap-2 cursor-pointer select-none
-            ${isProcessing 
-              ? 'bg-accent-app/20 text-accent-app border border-accent-app/30 cursor-wait' 
-              : 'bg-accent-app hover:bg-accent-hover hover:scale-[1.01] active:scale-[0.99] text-white shadow-lg shadow-accent-app/10 border border-accent-app/20'
-            }
-          `}
+          className="studio-btn studio-btn-primary w-full"
         >
           {isProcessing ? (
             <>
-              <svg className="animate-spin h-4 w-4 text-accent-app" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
-              <span>Removing Background ({progress}%)</span>
+              <span className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+              <span>Removing background… {progress}%</span>
             </>
           ) : (
             <>
-              <BsStars className="w-4 h-4 text-white animate-pulse" />
-              <span>Remove Background</span>
+              <BsStars className="w-4 h-4" />
+              <span>Remove background</span>
             </>
           )}
         </button>
       ) : (
-        <div className="w-full">
-          <button
-            type="button"
-            onClick={() => setIsRefinerOpen(true)}
-            disabled={isProcessing}
-            className="w-full py-2.5 px-4 rounded-xl bg-accent-app hover:bg-accent-hover text-white font-extrabold text-sm transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-accent-app/15 border border-accent-app/20 flex items-center justify-center gap-1.5 animate-fadeIn"
-          >
-            <FaPaintBrush className="w-4 h-4 text-white" /> Retouch Background
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setIsRefinerOpen(true)}
+          disabled={isProcessing}
+          className="studio-btn studio-btn-secondary w-full"
+        >
+          <FaPaintBrush className="w-4 h-4 text-accent-app" /> Touch up edges
+        </button>
       )}
 
       {isProcessing && (
-        <div className="space-y-1.5 mt-2.5 px-1">
-          <div className="flex justify-between text-[12px] text-text-secondary font-semibold">
+        <div className="space-y-1.5" aria-live="polite">
+          <div className="flex justify-between text-[13px] text-text-secondary">
             <span>{statusText}</span>
-            <span>{progress}%</span>
+            <span className="tabular-nums">{progress}%</span>
           </div>
-          <div className="w-full bg-bg-app h-1.5 rounded-full overflow-hidden border border-border-app">
-            <div 
-              className="bg-gradient-to-r from-accent-app to-accent-hover h-full rounded-full transition-all duration-300"
+          <div className="w-full bg-bg-app h-1.5 rounded-full overflow-hidden">
+            <div
+              className="bg-accent-app h-full rounded-full transition-[width] duration-300 ease-out"
               style={{ width: `${progress}%` }}
             />
           </div>
         </div>
       )}
 
+      {engine && !isProcessing && (
+        <p className="flex items-center gap-1.5 text-[12px] text-text-secondary">
+          <FiCpu className="w-3.5 h-3.5" /> Runs on this device · {engine}
+        </p>
+      )}
+
       {error && (
-        <div className="mt-2.5 p-2 bg-danger-app/10 border border-danger-app/30 text-danger-app text-xs rounded-lg flex items-center gap-1.5">
-          <FiAlertCircle className="w-4 h-4 text-danger-app shrink-0" />
+        <div className="p-2.5 bg-danger-app/10 border border-danger-app/30 text-danger-app text-[13px] rounded-lg flex items-start gap-2">
+          <FiAlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
-      {/* Manual Refinement Dialog Modal */}
       <BGRefinerModal
         isOpen={isRefinerOpen}
         onClose={() => setIsRefinerOpen(false)}
@@ -388,4 +428,3 @@ export default function BGRemover({
     </div>
   );
 }
-

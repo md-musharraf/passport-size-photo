@@ -6,7 +6,9 @@ import { BsStars } from 'react-icons/bs';
 import { CLOTHING_TEMPLATES } from './ImageEditor';
 import { BatchItem } from './BatchWorkspace';
 import BGRefinerModal from './BGRefinerModal';
-import { removeBackground } from './BGRemover';
+import { removeBackground, type BgQuality } from './BGRemover';
+import { MIN_CROP_POS, MAX_CROP_POS } from '@/lib/faceAlign';
+import { usePanZoom } from '@/lib/usePanZoom';
 
 interface BatchEditModalProps {
   isOpen: boolean;
@@ -46,15 +48,37 @@ export default function BatchEditModal({
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState('Ready to remove background');
-  const [modelQuality, setModelQuality] = useState<'isnet' | 'isnet_fp16'>('isnet_fp16');
+  const [modelQuality, setModelQuality] = useState<BgQuality>('auto');
   const [isRefinerOpen, setIsRefinerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<'crop' | 'cutout' | 'color' | 'suits'>('crop');
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStartRef = useRef({ x: 0, y: 0, cropX: 50, cropY: 50, clothX: 50, clothY: 55 });
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeDragTarget, setActiveDragTarget] = useState<'photo' | 'clothing'>('photo');
+
+  // Drag / wheel / pinch on the preview (mouse, touch and pen).
+  const movingClothing = activeDragTarget === 'clothing' && clothingTemplate !== 'none';
+  const zoomClamp = (v: number) => Math.min(Math.max(Math.round(v), 30), 300);
+  usePanZoom(containerRef, isOpen && !!item, {
+    getStart: () =>
+      movingClothing
+        ? { x: clothingPosition.x, y: clothingPosition.y, scale: clothingScale }
+        : { x: cropPosition.x, y: cropPosition.y, scale: cropScale },
+    onPan: (dx, dy, start) => {
+      if (movingClothing) {
+        setClothingPosition({ x: Math.min(Math.max(start.x + dx, 0), 100), y: Math.min(Math.max(start.y + dy, 0), 100) });
+      } else {
+        setCropPosition({
+          x: Math.min(Math.max(start.x - dx, MIN_CROP_POS), MAX_CROP_POS),
+          y: Math.min(Math.max(start.y - dy, MIN_CROP_POS), MAX_CROP_POS),
+        });
+      }
+    },
+    onZoom: (factor, start) => {
+      if (movingClothing) setClothingScale(zoomClamp(start.scale * factor));
+      else setCropScale(zoomClamp(start.scale * factor));
+    },
+  });
 
   useEffect(() => {
     if (item) {
@@ -85,8 +109,7 @@ export default function BatchEditModal({
     try {
       const processed = await removeBackground(
         item.originalImage, 
-        modelQuality, 
-        'gpu',
+        modelQuality,
         (p) => {
           setProgress(p);
           if (p < 20) {
@@ -135,47 +158,6 @@ export default function BatchEditModal({
     onClose();
   };
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    setIsDragging(true);
-    dragStartRef.current = {
-      x: e.clientX,
-      y: e.clientY,
-      cropX: cropPosition.x,
-      cropY: cropPosition.y,
-      clothX: clothingPosition.x,
-      clothY: clothingPosition.y,
-    };
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging || !containerRef.current) return;
-    const dx = e.clientX - dragStartRef.current.x;
-    const dy = e.clientY - dragStartRef.current.y;
-    const width = containerRef.current.clientWidth;
-    const height = containerRef.current.clientHeight;
-
-    if (activeDragTarget === 'clothing' && clothingTemplate !== 'none') {
-      const scaleMultiplier = 0.5;
-      const newX = dragStartRef.current.clothX + (dx / width) * 100 * scaleMultiplier;
-      const newY = dragStartRef.current.clothY + (dy / height) * 100 * scaleMultiplier;
-      setClothingPosition({
-        x: Math.min(Math.max(newX, 0), 100),
-        y: Math.min(Math.max(newY, 0), 100),
-      });
-    } else {
-      const newX = dragStartRef.current.cropX - (dx / width) * 100;
-      const newY = dragStartRef.current.cropY - (dy / height) * 100;
-      setCropPosition({
-        x: Math.min(Math.max(newX, 0), 100),
-        y: Math.min(Math.max(newY, 0), 100),
-      });
-    }
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
-
   const filterStyle = {
     filter: `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%) brightness(${exposure}%)`,
   };
@@ -189,16 +171,6 @@ export default function BatchEditModal({
 
   const photoSrc = processedImage || item.originalImage;
 
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const zoomSpeed = 0.05;
-    const delta = e.deltaY > 0 ? -1 : 1;
-    if (activeDragTarget === 'clothing' && clothingTemplate !== 'none') {
-      setClothingScale(prev => Math.min(Math.max(Math.round(prev * (1 + delta * zoomSpeed)), 30), 300));
-    } else {
-      setCropScale(prev => Math.min(Math.max(Math.round(prev * (1 + delta * zoomSpeed)), 30), 300));
-    }
-  };
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -224,12 +196,7 @@ export default function BatchEditModal({
           <div className="flex-1 bg-bg-app p-6 flex flex-col items-center justify-center relative select-none">
             <div 
               ref={containerRef}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseUp}
-              onWheel={handleWheel}
-              className="relative aspect-square w-full max-w-[320px] border-2 border-accent-app rounded-lg overflow-hidden shadow-inner cursor-grab active:cursor-grabbing"
+              className="touch-none-canvas relative aspect-square w-full max-w-[320px] border-2 border-accent-app rounded-lg overflow-hidden shadow-inner cursor-grab active:cursor-grabbing"
               style={{ 
                 aspectRatio: `${presetWidthMm} / ${presetHeightMm}`,
                 backgroundColor: processedImage ? bgColor : '#1E293B',
@@ -433,12 +400,13 @@ export default function BatchEditModal({
                     </label>
                     <select
                       value={modelQuality}
-                      onChange={(e) => setModelQuality(e.target.value as 'isnet' | 'isnet_fp16')}
+                      onChange={(e) => setModelQuality(e.target.value as BgQuality)}
                       disabled={isProcessing}
                       className="w-full bg-card-app border border-border-app text-text-primary text-[12.5px] font-bold rounded-xl px-3 py-2 outline-none focus:border-accent-app cursor-pointer"
                     >
-                      <option value="isnet">Ultra Quality (Precision)</option>
-                      <option value="isnet_fp16">Standard Quality (Faster)</option>
+                      <option value="auto">Automatic (recommended)</option>
+                      <option value="fast">Fast</option>
+                      <option value="best">Best edges (slower)</option>
                     </select>
                   </div>
 

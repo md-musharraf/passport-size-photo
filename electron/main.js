@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, protocol, net } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, net, nativeTheme } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -223,8 +223,9 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
-    minWidth: 1200,
-    minHeight: 700,
+    // The UI is responsive, so small laptops / netbooks (1024x600) work too.
+    minWidth: 960,
+    minHeight: 600,
     title: 'Passport Photo Generator',
     webPreferences: {
       nodeIntegration: false,
@@ -234,7 +235,8 @@ function createWindow() {
     },
     icon: path.join(__dirname, '../public/icon.png'),
     show: false,
-    backgroundColor: '#ffffff'
+    // Match the app theme so there is no white flash before the first paint.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#121418' : '#EEF0F3'
   });
 
   // Development mode vs Production mode
@@ -263,6 +265,7 @@ function getMimeType(filePath) {
     case '.css': return 'text/css; charset=utf-8';
     case '.json': return 'application/json; charset=utf-8';
     case '.wasm': return 'application/wasm';
+    case '.webp': return 'image/webp';
     case '.svg': return 'image/svg+xml';
     case '.png': return 'image/png';
     case '.jpg': case '.jpeg': return 'image/jpeg';
@@ -279,7 +282,7 @@ function getMimeType(filePath) {
 // Setup IPC handlers
 app.whenReady().then(() => {
   // Protocol handler for 'app' scheme using Node fs instead of net.fetch to ensure ASAR compatibility
-  protocol.handle('app', (request) => {
+  protocol.handle('app', async (request) => {
     try {
       const url = new URL(request.url);
       let filePath = decodeURIComponent(url.pathname);
@@ -291,8 +294,6 @@ app.whenReady().then(() => {
       
       // Target file path in the 'out' directory
       let absolutePath = path.normalize(path.join(__dirname, '..', 'out', filePath));
-      
-      console.log(`[app-protocol] Request: ${filePath}`);
       
       // Check if file exists. If it doesn't and doesn't have an extension (Next.js route), serve index.html
       if (!fs.existsSync(absolutePath)) {
@@ -310,7 +311,9 @@ app.whenReady().then(() => {
         }
       }
       
-      const data = fs.readFileSync(absolutePath);
+      // Async read: the AI model files are tens of MB and a synchronous read
+      // would freeze the main process (and the window) while they load.
+      const data = await fs.promises.readFile(absolutePath);
       const mimeType = getMimeType(absolutePath);
       
       return new Response(data, {
