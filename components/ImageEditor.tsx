@@ -6,6 +6,7 @@ import { FaPaintBrush, FaMagic } from 'react-icons/fa';
 import CountryFlag from './CountryFlag';
 import { computePassportAlignment, MIN_CROP_POS, MAX_CROP_POS, MIN_CROP_SCALE, MAX_CROP_SCALE } from '@/lib/faceAlign';
 import { usePanZoom } from '@/lib/usePanZoom';
+import { usePreviewImage } from '@/lib/usePreviewImage';
 import { analyzeFace, loadFaceLandmarker, type FaceAnalysis } from '@/lib/faceLandmarker';
 import { evaluateCompliance } from '@/lib/compliance';
 import { ScreenState } from '../app/page';
@@ -100,15 +101,8 @@ interface ImageEditorProps {
 
 // Preset specs now live in a single source of truth (lib/presets.ts).
 // Re-exported here so existing imports (`from './ImageEditor'`) keep working.
-export { PRESETS, PRESET_PIXELS, PASSPORT_PRESETS, getPreset } from '@/lib/presets';
-import { PRESETS, PRESET_PIXELS, getPreset } from '@/lib/presets';
-
-export const CLOTHING_TEMPLATES = [
-  { id: 'none' as const, name: 'Original', path: '' },
-  { id: 'suit_male' as const, name: 'Male Suit', path: 'clothing/suit_male.png' },
-  { id: 'suit_female' as const, name: 'Female Suit', path: 'clothing/suit_female.png' },
-  { id: 'tuxedo' as const, name: 'Tuxedo', path: 'clothing/tuxedo.png' },
-];
+export { PRESETS, PRESET_PIXELS, PASSPORT_PRESETS, getPreset, CLOTHING_TEMPLATES } from '@/lib/presets';
+import { PRESETS, PRESET_PIXELS, getPreset, CLOTHING_TEMPLATES } from '@/lib/presets';
 
 const autoAlignMemory = {
   image: { current: null as string | null },
@@ -404,6 +398,10 @@ export default function ImageEditor({
     transition: isDragging ? 'none' : 'transform 0.15s ease-out'
   };
 
+  // The print-sheet preview repeats the photo in every tile; a smaller copy
+  // keeps that screen smooth on phones. Only computed on that screen.
+  const sheetImage = usePreviewImage(activeScreen === 'print-sheet' ? imageData : null, 1024);
+
   // Clothing image styling
   const getClothingPath = () => {
     const tmpl = CLOTHING_TEMPLATES.find(c => c.id === clothingTemplate);
@@ -662,8 +660,9 @@ export default function ImageEditor({
                                 return (
                                   <>
                                     <img
-                                      src={imageData}
+                                      src={sheetImage ?? imageData}
                                       alt="Print Preview Tile"
+                                      decoding="async"
                                       style={{
                                         ...filterStyle,
                                         transform: `translate(-50%, -50%) translate(${(cropPosition.x - 50) * -1}%, ${(cropPosition.y - 50) * -1}%) scale(${(cropScale / 100)}) rotate(${rotation}deg)`,

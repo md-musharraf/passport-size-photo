@@ -1,7 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import jsPDF from 'jspdf';
-import { PRESETS, PRESET_PIXELS } from './ImageEditor';
+import { PRESETS, PRESET_PIXELS } from '@/lib/presets';
 import { 
   FiPrinter, FiImage, FiSave, FiCheckCircle, FiBarChart2, 
   FiFileText, FiType, FiFile, FiCheck, FiX, FiChevronDown, FiDownload,
@@ -10,6 +9,8 @@ import {
 import { BiMoveHorizontal } from 'react-icons/bi';
 import { FaRuler } from 'react-icons/fa';
 import MultiPersonPanel from './MultiPersonPanel';
+import { loadJsPDF, preloadJsPDF } from '@/lib/pdf';
+import { toast } from '@/lib/toast';
 
 interface DownloadButtonProps {
   imageData: string | null;
@@ -178,6 +179,11 @@ export default function DownloadButton({
 
   // Track previous paper size to detect transitions
   const [prevPaperSize, setPrevPaperSize] = useState(paperSize);
+
+  // The PDF library is loaded on demand; fetch it now so Export is instant.
+  useEffect(() => {
+    preloadJsPDF();
+  }, []);
 
   // Enforce A4 is always portrait, and set defaults for 4R
   useEffect(() => {
@@ -714,7 +720,15 @@ export default function DownloadButton({
     setGenerating(true);
     const img = new Image();
     img.onload = async () => {
-      const processedData = await applyFilters(img);
+      const [processedData, jsPDF] = await Promise.all([
+        applyFilters(img),
+        loadJsPDF().catch(() => null),
+      ]);
+      if (!jsPDF) {
+        setGenerating(false);
+        toast('Could not load the PDF exporter. Check your connection and try again.', 'error');
+        return;
+      }
       const gridSpecs = getGridSpecs();
       
       // A4 is always portrait

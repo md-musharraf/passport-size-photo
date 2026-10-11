@@ -21,6 +21,21 @@ function readAsDataUrl(file: Blob): Promise<string> {
   });
 }
 
+// toBlob encodes off the main thread in most browsers, so a large photo
+// doesn't freeze the page the way the synchronous toDataURL does.
+function encodeCanvas(canvas: HTMLCanvasElement, type: string): Promise<string> {
+  return new Promise((resolve) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) readAsDataUrl(blob).then(resolve, () => resolve(canvas.toDataURL(type, JPEG_QUALITY)));
+        else resolve(canvas.toDataURL(type, JPEG_QUALITY));
+      },
+      type,
+      JPEG_QUALITY,
+    );
+  });
+}
+
 async function decode(file: Blob): Promise<{ source: CanvasImageSource; width: number; height: number; close: () => void }> {
   if (typeof createImageBitmap === 'function') {
     try {
@@ -74,7 +89,7 @@ export async function importImageFile(file: Blob): Promise<string> {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(decoded.source, 0, 0, canvas.width, canvas.height);
-    return keepPng ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+    return await encodeCanvas(canvas, keepPng ? 'image/png' : 'image/jpeg');
   } finally {
     decoded.close();
   }
