@@ -1,11 +1,11 @@
 {
   "name": "Passport Photo Generator",
   "short_name": "Passport Photo",
-  "description": "Create government-compliant passport photos instantly with AI-powered background removal and formatting tools.",
+  "description": "On-device AI passport, visa and ID photo maker with print-ready sheets.",
   "start_url": ".",
   "display": "standalone",
-  "background_color": "#020617",
-  "theme_color": "#3b82f6",
+  "background_color": "#EEF0F3",
+  "theme_color": "#1F5FBF",
   "icons": [
     {
       "src": "/globe.svg",

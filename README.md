@@ -1,38 +1,86 @@
-# passport-size-photo
+# Precision ID — Passport Photo Studio
 
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+A desktop (Electron) and web app for making passport, visa and ID photos and
+print-ready sheets. All AI runs **on the device** — photos never leave the
+computer.
 
-## Getting Started
+## What it does
 
-First, run the development server:
+1. **Photo** — drop/paste a picture, or take one with the camera. Several photos
+   at once make a group sheet.
+2. **Size** — pick the document (US, India, UK/EU, Schengen, Germany, Canada,
+   Australia, Japan, Singapore, China, OCI/PAN, stamp size…).
+3. **Edit** — the face is found and fitted to that document's rules
+   automatically; a live checklist shows what passes and how to fix the rest.
+   Background removal, backdrop colour, light/colour, outfits and an exam name
+   strip are available here.
+4. **Print** — choose A4 or 4×6 paper and copies, then export a PDF that
+   prints at the exact physical size.
+
+## AI models
+
+| Task | Model | Runs on |
+| --- | --- | --- |
+| Face landmarks, head pose, eyes open, expression | Google **MediaPipe Face Landmarker** (478 3D landmarks + iris + 52 blendshapes) via `@mediapipe/tasks-vision` | GPU (WebGL) with automatic CPU fallback |
+| Background removal | IS-Net via `@imgly/background-removal` | **WebGPU** when available (fp16 model), otherwise multi-threaded CPU (8-bit model) |
+
+The backend is chosen once per session from a hardware probe
+(`lib/device.ts`). If a GPU path crashes on a machine, that is remembered and
+the CPU path is used from then on.
+
+Auto-alignment (`lib/faceAlign.ts`) scales the crown-to-chin height into the
+middle of the document's head band, puts the eye line in its band, centres the
+face and levels the eyes. When a cut-out exists, its alpha mask gives the true
+top of the head. The same maths drives the live checklist (`lib/compliance.ts`)
+and is unit-tested against the PDF/PNG renderer so the preview and the print
+always agree.
+
+## Getting started
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run download-face-models   # MediaPipe runtime + face model into public/models (≈27 MB)
+npm run download-bg-models     # background-removal models into public/models (≈340 MB)
+npm run dev                    # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Without the downloads the web app still works — models are fetched from the
+official CDNs on first use. Desktop builds bundle them so the app is fully
+offline.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Desktop app
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run electron:dev     # dev server + Electron window
+npm run electron:build   # downloads models, builds, packages installers into dist-electron/
+```
 
-## Learn More
+### Checks
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm test        # licence crypto, sheet layout and face-alignment unit tests
+npm run lint
+npm run build
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Devices
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- Responsive layout: side-by-side editor on desktops, stacked editor with a
+  bottom action bar on tablets and phones.
+- Mouse, touch and pen: drag to move the photo, wheel or pinch to zoom.
+- Imported photos are turned upright (EXIF) and capped at 2400 px, which keeps
+  full print quality while making every step faster on low-end PCs.
+- Light and dark themes (follows the system until you choose).
 
-## Deploy on Vercel
+## Project layout
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```
+app/            Next.js app shell (page.tsx = workflow, layout.tsx = theme/viewport)
+components/     Editor, uploader, background remover, print/batch tools, licensing
+lib/            Pure logic: presets, alignment, compliance, face analysis, device probe
+electron/       Electron main/preload (licensing, local file protocol)
+scripts/        Model downloaders, icon tools, tests
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+> This project uses a recent Next.js release — see `AGENTS.md` before changing
+> framework-level code.

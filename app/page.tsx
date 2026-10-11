@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import PhotoUploader from "@/components/PhotoUploader";
 import BGRemover, { removeBackground, warmUpBackgroundModel } from "@/components/BGRemover";
 import ImageEditor from "@/components/ImageEditor";
@@ -8,12 +8,14 @@ import BatchWorkspace, { BatchItem } from "@/components/BatchWorkspace";
 import { useLicense } from "@/components/LicenseProvider";
 import DeveloperContactModal from "@/components/DeveloperContactModal";
 import { getPreset } from "@/lib/presets";
+import { importImageFile } from "@/lib/imageImport";
+import { toast } from "@/lib/toast";
 import {
   FiCamera,
   FiHelpCircle,
   FiSave,
   FiRotateCcw,
-  FiRefreshCw,
+  FiChevronLeft,
   FiChevronRight,
   FiUpload,
   FiSliders,
@@ -22,57 +24,13 @@ import {
   FiMoon,
   FiSun,
   FiClock,
+  FiSmile,
+  FiEye,
+  FiUser,
+  FiCheckCircle,
 } from "react-icons/fi";
 import { FaUndo, FaRedo, FaPaintBrush, FaMagic } from "react-icons/fa";
-import { BsStars } from "react-icons/bs";
-
-const MOCK_FACE_1 = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 100 100"><rect width="100" height="100" fill="%231E2D36"/><circle cx="50" cy="40" r="18" fill="%23ED8936"/><rect x="35" y="58" width="30" height="30" rx="10" fill="%233182CE"/><circle cx="44" cy="38" r="2" fill="white"/><circle cx="56" cy="38" r="2" fill="white"/><path d="M 44 47 Q 50 50 56 47" stroke="white" stroke-width="1.5" fill="none"/></svg>`;
-const MOCK_FACE_2 = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600" viewBox="0 0 100 100"><rect width="100" height="100" fill="%231A202C"/><circle cx="50" cy="38" r="16" fill="%23F6AD55"/><rect x="38" y="54" width="24" height="32" rx="8" fill="%23E53E3E"/><circle cx="45" cy="36" r="2" fill="white"/><circle cx="55" cy="36" r="2" fill="white"/><path d="M 46 44 Q 50 46 54 44" stroke="white" stroke-width="1.5" fill="none"/></svg>`;
-
-const MOCK_RECENT_PROJECTS = [
-  {
-    id: "1",
-    name: "Sample_Passport_US.json",
-    date: "2 hrs ago",
-    preset: "us",
-    image: MOCK_FACE_1,
-    data: {
-      originalImage: MOCK_FACE_1,
-      processedImage: null,
-      brightness: 105,
-      contrast: 100,
-      saturation: 100,
-      exposure: 100,
-      temperature: 0,
-      rotation: 0,
-      bgColor: "#FFFFFF",
-      cropPosition: { x: 50, y: 50 },
-      cropScale: 100,
-      preset: "us",
-    },
-  },
-  {
-    id: "2",
-    name: "Sample_Visa_India.json",
-    date: "Yesterday",
-    preset: "in",
-    image: MOCK_FACE_2,
-    data: {
-      originalImage: MOCK_FACE_2,
-      processedImage: null,
-      brightness: 100,
-      contrast: 105,
-      saturation: 100,
-      exposure: 100,
-      temperature: 5,
-      rotation: 0,
-      bgColor: "#A1CAF1",
-      cropPosition: { x: 50, y: 50 },
-      cropScale: 100,
-      preset: "in",
-    },
-  },
-];
+import { BsStars, BsLightbulb } from "react-icons/bs";
 
 export type ScreenState = "welcome" | "presets" | "adjust" | "print-sheet" | "success";
 
@@ -109,13 +67,84 @@ export interface EditorSnapshot {
   customGridRows: number;
 }
 
+// The four steps an operator walks through. "success" is shown after export
+// and marks every step complete.
+const WORKFLOW_STEPS: { id: ScreenState; label: string; hint: string }[] = [
+  { id: "welcome", label: "Photo", hint: "Add a portrait: drop a file, paste (Ctrl+V) or use the camera" },
+  { id: "presets", label: "Size", hint: "Choose the passport, visa or ID size you need" },
+  { id: "adjust", label: "Edit", hint: "Check the guides — drag to move, scroll or pinch to zoom" },
+  { id: "print-sheet", label: "Print", hint: "Pick paper and copies, then export the print sheet" },
+];
+
+const PHOTO_TIPS: { icon: ReactNode; title: string; text: string }[] = [
+  { icon: <FiUser className="w-4 h-4" />, title: "Face the camera", text: "Head straight, shoulders square." },
+  { icon: <FiSmile className="w-4 h-4" />, title: "Neutral expression", text: "Mouth closed, no big smile." },
+  { icon: <FiEye className="w-4 h-4" />, title: "Eyes open & visible", text: "No glare, hair away from eyes." },
+  { icon: <BsLightbulb className="w-4 h-4" />, title: "Soft, even light", text: "No shadows on the face." },
+];
+
+function ToolButton({
+  icon,
+  label,
+  title,
+  onClick,
+  disabled,
+}: {
+  icon: ReactNode;
+  label: string;
+  title: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={title}
+      className="w-full py-2.5 rounded-lg flex flex-col items-center justify-center gap-1 text-text-secondary hover:text-text-primary hover:bg-card-app disabled:opacity-35 disabled:pointer-events-none transition-colors cursor-pointer"
+    >
+      <span className="text-text-primary">{icon}</span>
+      <span className="text-[11px] font-medium">{label}</span>
+    </button>
+  );
+}
+
+function IconButton({
+  title,
+  onClick,
+  disabled,
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={title}
+      className="w-9 h-9 rounded-lg text-text-secondary hover:text-text-primary hover:bg-card-app disabled:opacity-35 disabled:pointer-events-none flex items-center justify-center transition-colors cursor-pointer shrink-0"
+    >
+      {children}
+    </button>
+  );
+}
+
 export default function Home() {
-  const { licenseState } = useLicense();
+  const { licenseState, isWebDemo, connection, openLicenseSettings } = useLicense();
   const [activeScreen, setActiveScreen] = useState<ScreenState>("welcome");
   const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [processedImage, setProcessedImage] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  // null until mounted: the real theme was already applied to <html> by the
+  // inline script in app/layout.tsx (saved choice, else the OS setting).
+  const [theme, setTheme] = useState<"dark" | "light" | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
 
   // Session auto-save / crash recovery
@@ -192,7 +221,7 @@ export default function Home() {
     const idle = (window as typeof window & { requestIdleCallback?: (cb: () => void) => number })
       .requestIdleCallback;
     const kick = () => {
-      warmUpBackgroundModel("isnet_quint8");
+      warmUpBackgroundModel("auto");
     };
     if (idle) idle(kick);
     else setTimeout(kick, 1200);
@@ -285,37 +314,26 @@ export default function Home() {
   const [history, setHistory] = useState<EditorSnapshot[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
 
-  // Synchronize layout theme
+  // Theme: adopt what the pre-paint script chose, then persist user toggles.
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const savedTheme = localStorage.getItem("theme") as "dark" | "light" | null;
-        if (savedTheme) setTheme(savedTheme);
-      } catch (e) {
-        console.warn("LocalStorage not available:", e);
-      }
-    }
+    setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
   }, []);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const root = window.document.documentElement;
-      if (theme === "light") {
-        root.classList.add("light");
-        root.classList.remove("dark");
-      } else {
-        root.classList.add("dark");
-        root.classList.remove("light");
-      }
-      try {
-        localStorage.setItem("theme", theme);
-      } catch (e) {
-        console.warn("LocalStorage not writable:", e);
-      }
+    if (!theme) return;
+    const root = document.documentElement;
+    root.classList.toggle("dark", theme === "dark");
+    root.classList.toggle("light", theme === "light");
+    try {
+      localStorage.setItem("theme", theme);
+    } catch {
+      /* storage unavailable — theme still applies for this session */
     }
   }, [theme]);
 
-  // Load sample project metadata
+  const toggleTheme = () => setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+
+  // Load a saved project / recovered session
   const handleProjectLoad = (project: any) => {
     if (project.originalImage) setOriginalImage(project.originalImage);
     if (project.processedImage !== undefined) setProcessedImage(project.processedImage);
@@ -726,11 +744,8 @@ export default function Home() {
     URL.revokeObjectURL(url);
   };
 
-  // Safe navigation checks
   const navigateToScreen = (screenName: ScreenState) => {
-    if (screenName !== "welcome" && !originalImage) {
-      handleImageUpload(MOCK_FACE_1);
-    }
+    if (screenName !== "welcome" && !originalImage) return;
     setActiveScreen(screenName);
   };
 
@@ -769,10 +784,11 @@ export default function Home() {
       if (!originalImage || isProcessing) return;
       setIsProcessing(true);
       try {
-        const result = await removeBackground(originalImage, "isnet_quint8", "cpu");
+        const result = await removeBackground(originalImage, "auto");
         handleBGRemoved(result);
-      } catch (e) {
-        alert("Background removal failed.");
+        toast("Background removed.", "success");
+      } catch (e: any) {
+        toast(e?.message || "Background removal failed. Please try again.", "error");
       } finally {
         setIsProcessing(false);
       }
@@ -861,13 +877,9 @@ export default function Home() {
           const blob = item.getAsFile();
           if (blob) {
             e.preventDefault();
-            const reader = new FileReader();
-            reader.onload = (evt) => {
-              if (evt.target?.result) {
-                handleImageUpload(evt.target.result as string);
-              }
-            };
-            reader.readAsDataURL(blob);
+            importImageFile(blob)
+              .then(handleImageUpload)
+              .catch(() => toast("Could not read the pasted image.", "error"));
             break;
           }
         }
@@ -932,271 +944,260 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history, historyIndex, originalImage, activeScreen]);
 
-  // Workflow steps layout
-  const workflowSteps: { id: ScreenState; label: string }[] = [
-    { id: "welcome", label: "Welcome" },
-    { id: "presets", label: "1. Presets" },
-    { id: "adjust", label: "2. Adjust & Cutout" },
-    { id: "print-sheet", label: "3. Print Sheet" },
-    { id: "success", label: "4. Success" },
-  ];
+  const currentStepIndex =
+    activeScreen === "success" ? WORKFLOW_STEPS.length : WORKFLOW_STEPS.findIndex((s) => s.id === activeScreen);
+  const currentStep = WORKFLOW_STEPS[Math.min(currentStepIndex, WORKFLOW_STEPS.length - 1)];
+  const canUndo = historyIndex > 0;
+  const canRedo = historyIndex < history.length - 1;
+
+  const goNext = () => {
+    if (activeScreen === "welcome") triggerImportClick();
+    else if (activeScreen === "presets") setActiveScreen("adjust");
+    else if (activeScreen === "adjust") setActiveScreen("print-sheet");
+    else if (activeScreen === "print-sheet") {
+      const exportBtn = document.getElementById("download-pdf-hidden-trigger");
+      if (exportBtn) exportBtn.click();
+      else setActiveScreen("success");
+    } else handleReset();
+  };
+
+  const goBack = () => {
+    if (activeScreen === "presets") setActiveScreen("welcome");
+    else if (activeScreen === "adjust") setActiveScreen("presets");
+    else if (activeScreen === "print-sheet") setActiveScreen("adjust");
+    else if (activeScreen === "success") setActiveScreen("print-sheet");
+  };
+
+  const nextLabel =
+    activeScreen === "welcome"
+      ? "Add photo"
+      : activeScreen === "print-sheet"
+        ? "Export PDF"
+        : activeScreen === "success"
+          ? "New photo"
+          : "Next";
+
+  const footerHint =
+    activeScreen === "success" ? "Done — your print sheet PDF has been saved." : currentStep.hint;
 
   return (
-    <main className="h-screen w-screen overflow-hidden flex flex-col bg-bg-app text-text-primary font-sans antialiased select-none relative">
-      {/* 1. Header (64px) */}
-      <header className="h-[64px] w-full border-b border-border-app bg-panel-app px-6 flex justify-between items-center select-none z-30 shrink-0 relative">
-        <div className="flex items-center gap-3">
-          <FiCamera className="w-6 h-6 text-accent-app" />
-          <span className="font-extrabold text-[22px] tracking-tight text-text-primary select-none">
-            Precision ID Studio
+    <main className="classic-ui h-full w-full overflow-hidden flex flex-col bg-bg-app text-text-primary font-sans antialiased select-none relative">
+      {/* ── Header ─────────────────────────────────────────────── */}
+      <header className="h-14 w-full border-b border-border-app bg-panel-app px-2 sm:px-4 flex items-center gap-2 sm:gap-4 z-30 shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0 shrink-0">
+          <span className="w-8 h-8 rounded-lg bg-accent-app text-white flex items-center justify-center shrink-0">
+            <FiCamera className="w-[18px] h-[18px]" />
           </span>
-          <span className="text-[10px] bg-card-app border border-border-app text-accent-app px-1.5 py-0.5 rounded font-black uppercase tracking-widest">
-            v2.0 PRO
-          </span>
+          <div className="hidden md:block leading-tight min-w-0">
+            <div className="text-[15px] font-semibold tracking-tight truncate">Precision ID Studio</div>
+            <div className="text-[11px] text-text-secondary truncate">Passport &amp; ID photos</div>
+          </div>
           {licenseState.type === "TRIAL" && (
-            <div className="text-[11px] bg-amber-500/10 border border-amber-500/30 text-amber-500 px-3 py-1 rounded-xl font-bold flex items-center gap-1.5 select-none shrink-0 animate-pulse">
-              <FiClock className="w-3.5 h-3.5" />
-              <span className="font-black tracking-wider text-[9px] sm:text-[10px]">
-                THIS IS TRIAL VERSION
-              </span>
-              <span className="bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-black text-[9px]">
-                {licenseState.daysRemaining}D Left
-              </span>
-            </div>
+            <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium text-warning-app bg-warning-app/10 border border-warning-app/25 px-2 py-0.5 rounded-md whitespace-nowrap">
+              <FiClock className="w-3 h-3" /> Trial · {licenseState.daysRemaining} days left
+            </span>
           )}
         </div>
 
-        {/* Workflow Stepper */}
-        <nav className="flex items-center gap-2 bg-bg-app p-1 border border-border-app rounded-xl select-none">
-          {workflowSteps.map((step, idx) => {
-            const isActive = activeScreen === step.id;
-            const isCompleted = workflowSteps.findIndex((s) => s.id === activeScreen) > idx;
-            return (
-              <div
-                key={step.id}
-                className="flex items-center"
-              >
-                {idx > 0 && <span className="h-[1px] w-4 bg-border-app mx-1 shrink-0" />}
-                <button
-                  disabled={step.id !== "welcome" && !originalImage}
-                  onClick={() => navigateToScreen(step.id)}
-                  className={`px-3 py-1 rounded-lg text-[13px] font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
-                    isActive
-                      ? "bg-accent-app text-white shadow-lg shadow-accent-app/10"
-                      : isCompleted
-                        ? "text-accent-app hover:text-accent-hover font-bold"
-                        : "text-neutral-500 hover:text-neutral-400 disabled:opacity-50 disabled:cursor-not-allowed"
-                  }`}
-                >
-                  <span
-                    className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] ${isActive ? "bg-white text-accent-app font-bold" : isCompleted ? "bg-accent-app/20 text-accent-app" : "bg-card-app text-neutral-400"}`}
+        {/* Stepper */}
+        <nav aria-label="Workflow" className="flex-1 flex justify-center min-w-0">
+          <ol className="flex items-center gap-1 sm:gap-1.5">
+            {WORKFLOW_STEPS.map((step, idx) => {
+              const isActive = idx === currentStepIndex;
+              const isDone = idx < currentStepIndex;
+              const reachable = step.id === "welcome" || !!originalImage;
+              return (
+                <li key={step.id} className="flex items-center">
+                  {idx > 0 && (
+                    <span
+                      aria-hidden
+                      className={`h-px w-3 sm:w-6 mx-0.5 sm:mx-1 ${isDone || isActive ? "bg-accent-app/60" : "bg-border-app"}`}
+                    />
+                  )}
+                  <button
+                    type="button"
+                    disabled={!reachable}
+                    onClick={() => navigateToScreen(step.id)}
+                    aria-current={isActive ? "step" : undefined}
+                    className={`flex items-center gap-1.5 rounded-full pl-1 pr-1 sm:pr-3 py-1 text-[13px] transition-colors cursor-pointer disabled:cursor-not-allowed ${
+                      isActive
+                        ? "bg-accent-app/10 text-accent-app font-semibold"
+                        : isDone
+                          ? "text-text-primary hover:bg-card-app"
+                          : "text-text-secondary hover:bg-card-app disabled:hover:bg-transparent disabled:opacity-60"
+                    }`}
                   >
-                    {isCompleted ? <FiCheck className="w-2.5 h-2.5" /> : idx + 1}
-                  </span>
-                  <span>{step.label}</span>
-                </button>
-              </div>
-            );
-          })}
+                    <span
+                      className={`w-6 h-6 rounded-full flex items-center justify-center text-[12px] font-semibold shrink-0 ${
+                        isActive
+                          ? "bg-accent-app text-white"
+                          : isDone
+                            ? "bg-success-app text-white"
+                            : "bg-card-app border border-border-app text-text-secondary"
+                      }`}
+                    >
+                      {isDone ? <FiCheck className="w-3.5 h-3.5" /> : idx + 1}
+                    </span>
+                    <span className={isActive ? "inline" : "hidden sm:inline"}>{step.label}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
         </nav>
 
-        {/* Right Help / Actions */}
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
-            className="w-10 h-10 rounded-xl border border-border-app bg-card-app text-text-primary hover:bg-panel-app flex items-center justify-center transition-colors cursor-pointer select-none"
-            title="Toggle Theme"
-          >
-            {theme === "dark" ? (
-              <FiSun className="w-5 h-5 text-text-primary" />
-            ) : (
-              <FiMoon className="w-5 h-5 text-text-primary" />
-            )}
-          </button>
-
-          <button
-            onClick={handleSaveProject}
-            disabled={!originalImage}
-            className="w-10 h-10 rounded-xl border border-border-app bg-card-app text-text-primary hover:bg-panel-app disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors cursor-pointer select-none"
-            title="Save Project (.json)"
-          >
-            <FiSave className="w-5 h-5 text-text-primary" />
-          </button>
-
-          <div className="w-[1px] h-4 bg-border-app" />
-
-          <button
-            onClick={() => setShowHelpModal(true)}
-            className="w-10 h-10 rounded-xl border border-border-app bg-card-app text-text-secondary hover:text-text-primary hover:bg-panel-app flex items-center justify-center transition-colors cursor-pointer select-none"
-            title="Help & Support"
-          >
-            <FiHelpCircle className="w-5 h-5" />
-          </button>
+        <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
+          {isWebDemo ? (
+            <span className="hidden xl:inline text-[11px] text-text-secondary border border-border-app rounded-md px-2 py-0.5 mr-1">
+              Web demo
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={openLicenseSettings}
+              className="hidden xl:inline-flex items-center gap-1.5 text-[11px] text-text-secondary hover:text-text-primary border border-border-app rounded-md px-2 py-0.5 mr-1 cursor-pointer"
+              title="Subscription dashboard connection"
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  connection.status === "connected"
+                    ? "bg-success-app"
+                    : connection.status === "unconfigured" || connection.status === "checking"
+                      ? "bg-warning-app"
+                      : "bg-danger-app"
+                }`}
+              />
+              {connection.status === "connected"
+                ? `Synced${connection.lastSyncTime ? ` · ${connection.lastSyncTime}` : ""}`
+                : connection.status === "unconfigured"
+                  ? "Dashboard not set"
+                  : connection.status === "checking"
+                    ? "Checking…"
+                    : "Offline"}
+            </button>
+          )}
+          <IconButton title={theme === "dark" ? "Light theme" : "Dark theme"} onClick={toggleTheme}>
+            {theme === "dark" ? <FiSun className="w-[18px] h-[18px]" /> : <FiMoon className="w-[18px] h-[18px]" />}
+          </IconButton>
+          <IconButton title="Save project (Ctrl+S)" onClick={handleSaveProject} disabled={!originalImage}>
+            <FiSave className="w-[18px] h-[18px]" />
+          </IconButton>
+          <IconButton title="Help & support" onClick={() => setShowHelpModal(true)}>
+            <FiHelpCircle className="w-[18px] h-[18px]" />
+          </IconButton>
         </div>
       </header>
 
-      {/* 2. Main Workspace layout (3 columns) */}
+      {/* ── Workspace ──────────────────────────────────────────── */}
       <section className="flex-1 w-full overflow-hidden relative z-10 flex min-h-0">
-        {/* Column A: Left Toolbar (80px) */}
-        <aside className="w-[80px] bg-panel-app border-r border-border-app flex flex-col items-center justify-between py-4 select-none shrink-0 z-20">
-          <div className="flex flex-col gap-3 w-full px-2">
-            <button
-              onClick={() => handleLeftToolbarAction("import")}
-              className="w-full aspect-square rounded-xl bg-card-app hover:bg-panel-app border border-border-app flex flex-col items-center justify-center gap-1 cursor-pointer transition-all active:scale-95"
-              title="Import Photo File"
-            >
-              <FiUpload className="w-5 h-5 text-accent-app" />
-              <span className="text-[10px] font-bold">Import</span>
-            </button>
-
-            <button
-              onClick={() => handleLeftToolbarAction("camera")}
-              className="w-full aspect-square rounded-xl bg-card-app hover:bg-panel-app border border-border-app flex flex-col items-center justify-center gap-1 cursor-pointer transition-all active:scale-95"
-              title="Capture Webcam"
-            >
-              <FiCamera className="w-5 h-5 text-accent-app" />
-              <span className="text-[10px] font-bold">Camera</span>
-            </button>
-
-            <div className="h-[1px] bg-border-app my-1 w-3/4 mx-auto" />
-
-            <button
-              disabled={!originalImage || isProcessing}
-              onClick={() => handleLeftToolbarAction("remove-bg")}
-              className="w-full aspect-square rounded-xl bg-card-app hover:bg-panel-app border border-border-app disabled:opacity-40 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-1 cursor-pointer transition-all active:scale-95"
-              title="Remove Background via AI"
-            >
-              <BsStars className="w-5 h-5 text-accent-app" />
-              <span className="text-[10px] font-bold">Cutout</span>
-            </button>
-
-            <button
-              disabled={!originalImage}
-              onClick={() => handleLeftToolbarAction("auto-align")}
-              className="w-full aspect-square rounded-xl bg-card-app hover:bg-panel-app border border-border-app disabled:opacity-40 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-1 cursor-pointer transition-all active:scale-95"
-              title="AI Auto Align Face"
-            >
-              <FaMagic className="w-5 h-5 text-emerald-400" />
-              <span className="text-[10px] font-bold">Align</span>
-            </button>
-
-            <button
-              disabled={!originalImage}
-              onClick={() => handleLeftToolbarAction("ai-enhance")}
-              className="w-full aspect-square rounded-xl bg-card-app hover:bg-panel-app border border-border-app disabled:opacity-40 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-1 cursor-pointer transition-all active:scale-95"
-              title="AI Color & Lighting Enhance"
-            >
-              <FiSliders className="w-5 h-5 text-accent-app" />
-              <span className="text-[10px] font-bold">Enhance</span>
-            </button>
-
-            <button
-              disabled={!originalImage}
-              onClick={() => handleLeftToolbarAction("ai-retouch")}
-              className="w-full aspect-square rounded-xl bg-card-app hover:bg-panel-app border border-border-app disabled:opacity-40 disabled:cursor-not-allowed flex flex-col items-center justify-center gap-1 cursor-pointer transition-all active:scale-95"
-              title="AI Smooth Skin Retouch"
-            >
-              <FaPaintBrush className="w-5 h-5 text-pink-400" />
-              <span className="text-[10px] font-bold">Retouch</span>
-            </button>
+        {/* Tool rail (desktop). On smaller screens the same tools live in the
+            Edit panel and the footer, so nothing is lost. */}
+        <aside className="hidden lg:flex w-[76px] bg-panel-app border-r border-border-app flex-col items-center justify-between py-3 shrink-0 z-20">
+          <div className="flex flex-col gap-1 w-full px-1.5">
+            <ToolButton icon={<FiUpload className="w-5 h-5" />} label="Open" title="Open photo (Ctrl+O)" onClick={() => handleLeftToolbarAction("import")} />
+            <ToolButton icon={<FiCamera className="w-5 h-5" />} label="Camera" title="Take a photo with the camera" onClick={() => handleLeftToolbarAction("camera")} />
+            <div className="h-px bg-border-app my-1.5 mx-3" />
+            <ToolButton icon={<BsStars className="w-5 h-5" />} label="Cut-out" title="Remove background (B)" disabled={!originalImage || isProcessing} onClick={() => handleLeftToolbarAction("remove-bg")} />
+            <ToolButton icon={<FaMagic className="w-[18px] h-[18px]" />} label="Align" title="Auto-align face (Space)" disabled={!originalImage} onClick={() => handleLeftToolbarAction("auto-align")} />
+            <ToolButton icon={<FiSliders className="w-5 h-5" />} label="Enhance" title="Auto colour & light" disabled={!originalImage} onClick={() => handleLeftToolbarAction("ai-enhance")} />
+            <ToolButton icon={<FaPaintBrush className="w-[17px] h-[17px]" />} label="Retouch" title="Soften skin" disabled={!originalImage} onClick={() => handleLeftToolbarAction("ai-retouch")} />
           </div>
-
-          {/* Bottom Undo/Redo */}
-          <div className="flex flex-col gap-2 w-full px-2">
-            <button
-              onClick={() => handleLeftToolbarAction("undo")}
-              disabled={historyIndex <= 0}
-              className="w-full h-10 rounded-xl bg-card-app hover:bg-panel-app border border-border-app disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all cursor-pointer"
-              title="Undo Action"
-            >
-              <FaUndo className="w-4 h-4 text-text-primary" />
-            </button>
-            <button
-              onClick={() => handleLeftToolbarAction("redo")}
-              disabled={historyIndex >= history.length - 1}
-              className="w-full h-10 rounded-xl bg-card-app hover:bg-panel-app border border-border-app disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center transition-all cursor-pointer"
-              title="Redo Action"
-            >
-              <FaRedo className="w-4 h-4 text-text-primary" />
-            </button>
+          <div className="flex flex-col gap-1 w-full px-1.5">
+            <ToolButton icon={<FaUndo className="w-4 h-4" />} label="Undo" title="Undo (Ctrl+Z)" disabled={!canUndo} onClick={() => handleLeftToolbarAction("undo")} />
+            <ToolButton icon={<FaRedo className="w-4 h-4" />} label="Redo" title="Redo (Ctrl+Y)" disabled={!canRedo} onClick={() => handleLeftToolbarAction("redo")} />
           </div>
         </aside>
 
-        {/* Column B: Center Workspace (Flexible, 45-50% width) */}
-        <div className="flex-1 bg-bg-app flex flex-col justify-center items-center p-6 min-h-0 relative overflow-hidden select-none">
+        <div
+          key={
+            activeScreen === "welcome" || activeScreen === "success"
+              ? activeScreen
+              : isMultiPersonMode && activeScreen === "print-sheet"
+                ? "batch"
+                : "editor"
+          }
+          className="flex-1 min-w-0 min-h-0 relative screen-enter">
           {activeScreen === "welcome" ? (
-            <div className="w-full max-w-xl flex flex-col justify-center gap-6 z-10 h-full max-h-[500px]">
-              <div className="text-center space-y-2">
-                <h1 className="app-heading text-accent-app">Studio Operator Console</h1>
-                <p className="app-label text-neutral-400">
-                  Import a high-resolution portrait or start the webcam to begin.
-                </p>
-              </div>
-
-              {recoverableSession && (
-                <div className="flex items-center gap-3 bg-accent-app/10 border border-accent-app/30 rounded-xl px-4 py-3 select-none">
-                  <FiClock className="w-4 h-4 text-accent-app shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13px] font-bold text-text-primary">
-                      Restore your last session?
-                    </p>
-                    <p className="text-[11px] text-text-secondary">
-                      An unsaved session was recovered
-                      {recoverableSession.savedAt
-                        ? ` from ${new Date(recoverableSession.savedAt).toLocaleString()}`
-                        : ""}
-                      .
-                    </p>
-                  </div>
-                  <button
-                    onClick={handleRestoreSession}
-                    className="text-[12px] font-bold px-3 py-1.5 rounded-lg bg-accent-app text-white hover:bg-accent-hover transition-colors cursor-pointer shrink-0"
-                  >
-                    Restore
-                  </button>
-                  <button
-                    onClick={handleDismissSession}
-                    className="text-[12px] font-bold px-2 py-1.5 rounded-lg text-text-secondary hover:text-text-primary transition-colors cursor-pointer shrink-0"
-                  >
-                    Dismiss
-                  </button>
+            <div className="h-full overflow-y-auto panel-scrollbar">
+              <div className="w-full max-w-2xl mx-auto px-4 py-6 sm:py-10 flex flex-col gap-5">
+                <div className="text-center space-y-1.5">
+                  <h1 className="app-heading">Create a passport photo</h1>
+                  <p className="text-[14px] text-text-secondary">
+                    Add a portrait to begin. Everything runs on this device — your photos never leave it.
+                  </p>
                 </div>
-              )}
 
-              <PhotoUploader
-                onImageUpload={handleImageUpload}
-                onImagesUpload={handleMultipleImagesUpload}
-                onProjectLoad={handleProjectLoad}
-              />
+                {recoverableSession && (
+                  <div className="flex flex-wrap items-center gap-3 bg-card-app border border-border-app rounded-lg px-4 py-3 elevate-sm">
+                    <FiClock className="w-4 h-4 text-accent-app shrink-0" />
+                    <div className="flex-1 min-w-[180px]">
+                      <p className="text-[14px] font-medium">Continue where you left off?</p>
+                      <p className="text-[12px] text-text-secondary">
+                        Unsaved work
+                        {recoverableSession.savedAt
+                          ? ` from ${new Date(recoverableSession.savedAt).toLocaleString()}`
+                          : ""}{" "}
+                        was recovered.
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={handleDismissSession} className="studio-btn studio-btn-ghost !min-h-9 !px-3 text-[14px]">
+                        Discard
+                      </button>
+                      <button onClick={handleRestoreSession} className="studio-btn studio-btn-primary !min-h-9 !px-3 text-[14px]">
+                        Restore
+                      </button>
+                    </div>
+                  </div>
+                )}
 
-              <div className="glass-card bg-panel-app border border-border-app rounded-xl p-4 space-y-2">
-                <h4 className="text-[13px] font-black text-accent-app uppercase tracking-widest">
-                  Recent Session Profiles
-                </h4>
-                <div className="grid grid-cols-2 gap-3">
-                  {MOCK_RECENT_PROJECTS.map((proj) => (
-                    <button
-                      key={proj.id}
-                      onClick={() => handleProjectLoad(proj.data)}
-                      className="p-2 rounded-xl bg-card-app border border-border-app hover:bg-panel-app transition-all text-left flex items-center gap-3 cursor-pointer group"
-                    >
-                      <div className="w-10 h-10 rounded-lg overflow-hidden border border-border-app bg-bg-app shrink-0">
-                        <img
-                          src={proj.image}
-                          alt={proj.name}
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-[12px] font-bold text-text-primary truncate group-hover:text-accent-hover transition-colors">
-                          {proj.name}
-                        </p>
-                        <p className="text-[10px] text-text-secondary font-semibold mt-0.5">
-                          {proj.date}
-                        </p>
-                      </div>
-                    </button>
-                  ))}
+                <PhotoUploader
+                  onImageUpload={handleImageUpload}
+                  onImagesUpload={handleMultipleImagesUpload}
+                  onProjectLoad={handleProjectLoad}
+                />
+
+                <div className="bg-card-app border border-border-app rounded-lg p-4 elevate-sm">
+                  <h2 className="text-[13px] font-semibold text-text-primary mb-3">Tips for an accepted photo</h2>
+                  <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {PHOTO_TIPS.map((tip) => (
+                      <li key={tip.title} className="flex items-start gap-2.5">
+                        <span className="w-7 h-7 rounded-md bg-accent-app/10 text-accent-app flex items-center justify-center shrink-0">
+                          {tip.icon}
+                        </span>
+                        <span className="leading-tight">
+                          <span className="block text-[13px] font-medium">{tip.title}</span>
+                          <span className="block text-[12px] text-text-secondary">{tip.text}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          ) : activeScreen === "success" ? (
+            <div className="h-full overflow-y-auto panel-scrollbar">
+              <div className="max-w-md mx-auto px-4 py-10 sm:py-16 text-center flex flex-col items-center gap-5">
+                <span className="w-14 h-14 rounded-full bg-success-app/12 text-success-app flex items-center justify-center">
+                  <FiCheckCircle className="w-8 h-8" />
+                </span>
+                <div className="space-y-1.5">
+                  <h1 className="app-heading">Your print sheet is ready</h1>
+                  <p className="text-[14px] text-text-secondary">
+                    The PDF was saved to your downloads. Print it at 100% scale (no “fit to page”) so every photo
+                    keeps its exact {getPreset(preset).widthMm} × {getPreset(preset).heightMm} mm size.
+                  </p>
+                </div>
+                <div className="w-full grid gap-2 pt-2">
+                  <button onClick={() => setActiveScreen("print-sheet")} className="studio-btn studio-btn-secondary w-full">
+                    <FiPrinter className="w-4 h-4" /> Change layout or export again
+                  </button>
+                  <button onClick={handleSaveProject} disabled={!originalImage} className="studio-btn studio-btn-secondary w-full">
+                    <FiSave className="w-4 h-4" /> Save project for later
+                  </button>
+                  <button onClick={handleReset} className="studio-btn studio-btn-primary w-full">
+                    <FiCamera className="w-4 h-4" /> Start a new photo
+                  </button>
                 </div>
               </div>
             </div>
@@ -1300,8 +1301,8 @@ export default function Home() {
                 onPresetChange={handlePresetChange}
                 onBGRemove={handleBGRemoved}
                 isProcessing={isProcessing}
-                theme={theme}
-                onThemeToggle={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
+                theme={theme ?? "light"}
+                onThemeToggle={toggleTheme}
                 onSnapshot={captureHistorySnapshot}
                 bgRemover={
                   <BGRemover
@@ -1396,160 +1397,82 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 3. Fixed Bottom Action Bar (72px) */}
-      <footer className="h-[72px] w-full border-t border-border-app bg-panel-app px-6 py-2.5 flex justify-between items-center select-none z-30 shrink-0 relative">
-        {/* Left Footer Action */}
-        <div className="flex gap-2 w-1/4">
+      {/* ── Footer ─────────────────────────────────────────────── */}
+      <footer className="h-16 w-full border-t border-border-app bg-panel-app px-2 sm:px-4 flex items-center gap-2 sm:gap-4 z-30 shrink-0 pb-[env(safe-area-inset-bottom)]">
+        <div className="flex items-center gap-1 shrink-0">
           {activeScreen !== "welcome" && (
-            <button
-              onClick={handleReset}
-              className="studio-btn studio-btn-secondary"
-            >
-              <FiRotateCcw className="w-5 h-5 mr-2" /> Start Over
+            <button onClick={handleReset} className="studio-btn studio-btn-ghost !px-2.5 sm:!px-3" title="Start over">
+              <FiRotateCcw className="w-4 h-4" />
+              <span className="hidden sm:inline">Start over</span>
             </button>
+          )}
+          {originalImage && (
+            <div className="flex lg:hidden items-center">
+              <IconButton title="Undo" onClick={handleUndo} disabled={!canUndo}>
+                <FaUndo className="w-3.5 h-3.5" />
+              </IconButton>
+              <IconButton title="Redo" onClick={handleRedo} disabled={!canRedo}>
+                <FaRedo className="w-3.5 h-3.5" />
+              </IconButton>
+            </div>
           )}
         </div>
 
-        {/* Center Tip Info & Keyboard Shortcut Quick Bar */}
-        <div className="flex flex-col items-center justify-center text-center select-none">
-          <span className="text-[13px] font-bold text-neutral-300">
-            {activeScreen === "welcome" && "Passport Photo Creator Pro • Fully Offline AI Engine"}
-            {activeScreen === "presets" && "Step 1: Select biometric document preset standard"}
-            {activeScreen === "adjust" &&
-              "Step 2: Align face with biometric overlay & adjust formal suits"}
-            {activeScreen === "print-sheet" &&
-              "Step 3: Configure grid layout, skipped slots, and borders"}
-            {activeScreen === "success" && "Export complete! Save project or print document sheet"}
+        <div className="flex-1 min-w-0 hidden md:flex flex-col items-center justify-center text-center">
+          <span className="text-[13px] text-text-secondary truncate max-w-full">{footerHint}</span>
+          <span className="hidden 2xl:flex items-center gap-3 mt-0.5 text-[11px] text-text-secondary/80">
+            <span><kbd className="font-sans font-semibold">Ctrl+V</kbd> paste</span>
+            <span><kbd className="font-sans font-semibold">Space</kbd> auto-align</span>
+            <span><kbd className="font-sans font-semibold">B</kbd> cut-out</span>
+            <span><kbd className="font-sans font-semibold">1–5</kbd> sizes</span>
+            <span><kbd className="font-sans font-semibold">Ctrl+P</kbd> export</span>
           </span>
-          <div className="flex items-center gap-2 mt-0.5 text-[10px] font-extrabold text-accent-app">
-            <span className="bg-card-app border border-border-app px-1.5 py-0.2 rounded">
-              Ctrl+V Paste
-            </span>
-            <span>•</span>
-            <span className="bg-card-app border border-border-app px-1.5 py-0.2 rounded">
-              Space Auto-Align
-            </span>
-            <span>•</span>
-            <span className="bg-card-app border border-border-app px-1.5 py-0.2 rounded">
-              1..5 Presets
-            </span>
-            <span>•</span>
-            <span className="bg-card-app border border-border-app px-1.5 py-0.2 rounded">
-              Ctrl+P Print
-            </span>
-          </div>
         </div>
+        <div className="flex-1 md:hidden" />
 
-        {/* Right Footer Contextual CTAs (Min height 48px, rounded 12px, font 16px) */}
-        <div className="w-1/4 flex justify-end items-center gap-3 select-none">
-          {activeScreen === "welcome" ? (
-            <button
-              onClick={triggerImportClick}
-              className="studio-btn studio-btn-primary"
-            >
-              Import Portrait <FiChevronRight className="w-4 h-4 ml-1.5" />
-            </button>
-          ) : activeScreen === "presets" ? (
-            <div className="flex gap-2">
-              <button
-                onClick={() => setActiveScreen("welcome")}
-                className="studio-btn studio-btn-secondary"
-              >
-                Back
-              </button>
-              <button
-                onClick={() => setActiveScreen("adjust")}
-                className="studio-btn studio-btn-primary"
-              >
-                Next (Adjust) <FiChevronRight className="w-4 h-4 ml-1.5" />
-              </button>
-            </div>
-          ) : activeScreen === "adjust" ? (
-            <div className="flex gap-2">
-              <button
-                onClick={() => setActiveScreen("presets")}
-                className="studio-btn studio-btn-secondary"
-              >
-                Back
-              </button>
-              <button
-                onClick={() => setActiveScreen("print-sheet")}
-                className="studio-btn studio-btn-primary"
-              >
-                Next (Print Sheet) <FiChevronRight className="w-4 h-4 ml-1.5" />
-              </button>
-            </div>
-          ) : activeScreen === "print-sheet" ? (
-            <div className="flex gap-2">
-              <button
-                onClick={() => setActiveScreen("adjust")}
-                className="studio-btn studio-btn-secondary"
-              >
-                Back
-              </button>
-              <button
-                onClick={() => {
-                  const exportBtn = document.getElementById("download-pdf-hidden-trigger");
-                  if (exportBtn) {
-                    exportBtn.click();
-                  } else {
-                    setActiveScreen("success");
-                  }
-                }}
-                className="studio-btn studio-btn-success"
-              >
-                Export Sheet <FiPrinter className="w-4 h-4 ml-1.5" />
-              </button>
-            </div>
-          ) : (
-            /* Success Screen CTA */
-            <button
-              onClick={handleReset}
-              className="studio-btn studio-btn-primary"
-            >
-              Start New Photo <FiRefreshCw className="w-4 h-4 ml-1.5" />
+        <div className="flex items-center gap-2 shrink-0">
+          {activeScreen !== "welcome" && (
+            <button onClick={goBack} className="studio-btn studio-btn-secondary !px-3 sm:!px-4">
+              <FiChevronLeft className="w-4 h-4" />
+              <span className="hidden sm:inline">Back</span>
             </button>
           )}
+          <button
+            onClick={goNext}
+            className={`studio-btn ${activeScreen === "print-sheet" ? "studio-btn-success" : "studio-btn-primary"}`}
+          >
+            {activeScreen === "print-sheet" && <FiPrinter className="w-4 h-4" />}
+            {activeScreen === "welcome" && <FiUpload className="w-4 h-4" />}
+            {nextLabel}
+            {(activeScreen === "presets" || activeScreen === "adjust") && <FiChevronRight className="w-4 h-4" />}
+          </button>
         </div>
       </footer>
 
-      {/* Hidden file input for file uploads */}
+      {/* Hidden file input shared by the toolbar, footer and Ctrl+O */}
       <input
         type="file"
         accept="image/*,.json"
         id="toolbar-welcome-file-input"
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) {
-            if (file.name.endsWith(".json")) {
-              const reader = new FileReader();
-              reader.onload = (e) => {
-                try {
-                  const projectObj = JSON.parse(e.target?.result as string);
-                  handleProjectLoad(projectObj);
-                } catch (err) {
-                  alert("Invalid project JSON.");
-                }
-              };
-              reader.readAsText(file);
-            } else {
-              const reader = new FileReader();
-              reader.onload = (e) => {
-                handleImageUpload(e.target?.result as string);
-              };
-              reader.readAsDataURL(file);
-            }
-          }
           e.target.value = "";
+          if (!file) return;
+          if (file.name.toLowerCase().endsWith(".json")) {
+            file
+              .text()
+              .then((text) => handleProjectLoad(JSON.parse(text)))
+              .catch(() => toast("That project file could not be opened.", "error"));
+          } else {
+            importImageFile(file)
+              .then(handleImageUpload)
+              .catch(() => toast("That image could not be opened.", "error"));
+          }
         }}
         className="hidden"
       />
 
-      {/* Developer Contact & Support Modal */}
-      <DeveloperContactModal
-        isOpen={showHelpModal}
-        onClose={() => setShowHelpModal(false)}
-      />
+      <DeveloperContactModal isOpen={showHelpModal} onClose={() => setShowHelpModal(false)} />
     </main>
   );
 }

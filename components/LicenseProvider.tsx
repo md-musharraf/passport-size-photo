@@ -45,6 +45,11 @@ interface LicenseContextType {
   checkStatus: () => Promise<void>;
   activateKey: (key: string) => Promise<boolean>;
   requestTrial: () => Promise<boolean>;
+  /** Running in a plain browser (no Electron licensing). */
+  isWebDemo: boolean;
+  /** Admin-dashboard sync state, shown as a status chip in the app header. */
+  connection: { status: 'connected' | 'disconnected' | 'checking' | 'unconfigured'; lastSyncTime: string | null };
+  openLicenseSettings: () => void;
 }
 
 const LicenseContext = createContext<LicenseContextType | undefined>(undefined);
@@ -340,38 +345,20 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
   // If valid, render normal application
   if (licenseState.isValid) {
     return (
-      <LicenseContext.Provider value={{ licenseState: { ...licenseState, machineId }, remoteStatus, checkStatus, activateKey, requestTrial }}>
-
-        {isWebDemo && (
-          <div className="absolute top-2 right-2 bg-amber-500/10 border border-amber-500/30 text-amber-500 px-3 py-1 rounded-full text-[10px] font-black tracking-widest uppercase z-[9999] select-none">
-            Web Demo Console
-          </div>
-        )}
-
-        {/* Dashboard Connection Status Badge — only in Electron */}
-        {!isWebDemo && (
-          <button 
-            onClick={() => setShowSettings(true)}
-            className={`fixed bottom-3 left-3 px-3 py-1.5 rounded-full text-[9px] font-black tracking-widest uppercase z-[9999] select-none flex items-center gap-1.5 border backdrop-blur-sm transition-all duration-300 cursor-pointer hover:scale-105 active:scale-95 hover:bg-white/5 ${
-              connectionStatus === 'connected'
-                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-                : connectionStatus === 'unconfigured'
-                ? 'bg-amber-500/10 border-amber-500/20 text-amber-400 animate-pulse'
-                : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
-            }`}
-          >
-            <div className={`w-1.5 h-1.5 rounded-full ${
-              connectionStatus === 'connected' ? 'bg-emerald-400' 
-              : connectionStatus === 'unconfigured' ? 'bg-amber-400'
-              : 'bg-rose-400'
-            }`} />
-            {connectionStatus === 'connected' 
-              ? `Synced${lastSyncTime ? ` · ${lastSyncTime}` : ''}` 
-              : connectionStatus === 'unconfigured'
-              ? 'Dashboard Not Configured'
-              : 'Dashboard Offline'}
-          </button>
-        )}
+      <LicenseContext.Provider
+        value={{
+          licenseState: { ...licenseState, machineId },
+          remoteStatus,
+          checkStatus,
+          activateKey,
+          requestTrial,
+          isWebDemo,
+          connection: { status: connectionStatus, lastSyncTime },
+          openLicenseSettings: () => setShowSettings(true),
+        }}
+      >
+        {/* Demo / sync status now lives in the app header (app/page.tsx) so it
+            no longer floats over the toolbar and the Start-over button. */}
 
         {/* Modal Settings Overlay when settings is opened inside the valid app */}
         {showSettings && !isWebDemo && (

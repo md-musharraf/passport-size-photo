@@ -1,18 +1,13 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import CropSlider from './CropSlider';
-import { 
-  FiCamera, FiRefreshCw, FiCheck, FiCheckCircle, FiAlertCircle, FiX,
-  FiLayout, FiSun, FiRotateCw, FiSliders, FiEye, FiUser, FiTarget, 
-  FiPrinter, FiFileText, FiSmile, FiChevronUp, FiChevronDown, FiThermometer
-} from 'react-icons/fi';
-import { FaRuler, FaPaintBrush, FaRegLightbulb, FaMagic } from 'react-icons/fa';
-import { BiMoveHorizontal, BiMoveVertical } from 'react-icons/bi';
-import { IoContrast } from 'react-icons/io5';
-import { BsStars, BsEyedropper, BsMouse } from 'react-icons/bs';
+import { FiCheckCircle, FiAlertTriangle, FiXCircle, FiX, FiSun, FiChevronDown, FiMove } from 'react-icons/fi';
+import { FaPaintBrush, FaMagic } from 'react-icons/fa';
 import CountryFlag from './CountryFlag';
-import { computePassportAlignment, HEAD_BOX_EXPANSION } from '@/lib/faceAlign';
-import { ensureFaceModels, makeDetectorOptions } from '@/lib/faceModels';
+import { computePassportAlignment, MIN_CROP_POS, MAX_CROP_POS, MIN_CROP_SCALE, MAX_CROP_SCALE } from '@/lib/faceAlign';
+import { usePanZoom } from '@/lib/usePanZoom';
+import { analyzeFace, loadFaceLandmarker, type FaceAnalysis } from '@/lib/faceLandmarker';
+import { evaluateCompliance } from '@/lib/compliance';
 import { ScreenState } from '../app/page';
 
 interface ImageEditorProps {
@@ -106,7 +101,7 @@ interface ImageEditorProps {
 // Preset specs now live in a single source of truth (lib/presets.ts).
 // Re-exported here so existing imports (`from './ImageEditor'`) keep working.
 export { PRESETS, PRESET_PIXELS, PASSPORT_PRESETS, getPreset } from '@/lib/presets';
-import { PRESETS, PRESET_PIXELS, PASSPORT_PRESETS, getPreset } from '@/lib/presets';
+import { PRESETS, PRESET_PIXELS, getPreset } from '@/lib/presets';
 
 export const CLOTHING_TEMPLATES = [
   { id: 'none' as const, name: 'Original', path: '' },
@@ -114,6 +109,11 @@ export const CLOTHING_TEMPLATES = [
   { id: 'suit_female' as const, name: 'Female Suit', path: 'clothing/suit_female.png' },
   { id: 'tuxedo' as const, name: 'Tuxedo', path: 'clothing/tuxedo.png' },
 ];
+
+const autoAlignMemory = {
+  image: { current: null as string | null },
+  preset: { current: null as string | null },
+};
 
 export default function ImageEditor({
   activeScreen,
@@ -203,299 +203,156 @@ export default function ImageEditor({
 }: ImageEditorProps) {
   const [faceModelsLoaded, setFaceModelsLoaded] = useState(false);
   const [isDetectingFace, setIsDetectingFace] = useState(false);
-  const [faceChecklist, setFaceChecklist] = useState({
-    detected: true,
-    centered: true,
-    lightingOk: true,
-    rotatedOk: true,
-  });
-  // Raw biometric measurements from the last face detection, used by the
-  // live ICAO compliance panel. Null until a detection has run.
-  const [compliance, setCompliance] = useState<{
-    faceBoxRatio: number; // face-box height / source-image height
-    tiltDeg: number;      // head roll in degrees
-    centerX: number;      // face centre X as % of source width
-    faceLuminance: number; // average face luminance 0-255
-  } | null>(null);
+  // Last MediaPipe face analysis of the displayed photo. The compliance
+  // checklist is derived from it plus the live crop, so it updates while the
+  // operator drags/zooms without re-running detection.
+  const [faceAnalysis, setFaceAnalysis] = useState<FaceAnalysis | null>(null);
+  const [faceMissing, setFaceMissing] = useState(false);
   const [isEnhanced, setIsEnhanced] = useState(false);
   const [isRetouched, setIsRetouched] = useState(false);
+  // Transient status line shown over the canvas (doesn't shift the layout).
+  // Success/info messages fade on their own; warnings/errors stay until closed.
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'info' | 'error' | 'warning' } | null>(null);
+  useEffect(() => {
+    if (!message || message.type === 'warning' || message.type === 'error') return;
+    const t = setTimeout(() => setMessage(null), 3500);
+    return () => clearTimeout(t);
+  }, [message]);
 
-  const [openSections, setOpenSections] = useState({
-    presets: true,
-    slate: false,
-    bg: false,
-    adjust: false,
-    ai: false,
-    print: false
+  // ── Canvas gestures: drag to pan, wheel / pinch to zoom ───────────────
+  const containerRef = useRef<HTMLDivElement>(null);
+  const editingClothing = canvasActiveItem === 'clothing' && clothingTemplate !== 'none';
+  const clampPos = (v: number) => Math.min(Math.max(v, MIN_CROP_POS), MAX_CROP_POS);
+  const clampScale = (v: number) => Math.min(Math.max(Math.round(v), MIN_CROP_SCALE), MAX_CROP_SCALE);
+
+  const { isDragging } = usePanZoom(containerRef, !!imageData && activeScreen !== 'print-sheet', {
+    getStart: () =>
+      editingClothing
+        ? { x: clothingPosition.x, y: clothingPosition.y, scale: clothingScale }
+        : { x: cropPosition.x, y: cropPosition.y, scale: cropScale },
+    onPan: (dx, dy, start) => {
+      if (editingClothing) {
+        onClothingPositionChange({
+          x: Math.min(Math.max(start.x + dx, 0), 100),
+          y: Math.min(Math.max(start.y + dy, 0), 100),
+        });
+      } else {
+        onCropPositionChange({ x: clampPos(start.x - dx), y: clampPos(start.y - dy) });
+      }
+    },
+    onZoom: (factor, start) => {
+      if (editingClothing) onClothingScaleChange(clampScale(start.scale * factor));
+      else onCropScaleChange(clampScale(start.scale * factor));
+    },
+    onEnd: () => onSnapshot?.(),
   });
 
-  const toggleSection = (section: keyof typeof openSections) => {
-    setOpenSections(prev => ({
-      ...prev,
-      [section]: !prev[section]
-    }));
-  };
-
-  // Synchronize expanded accordion to active screen state
+  // Load the MediaPipe face model once (GPU delegate when available, CPU otherwise).
   useEffect(() => {
-    if (activeScreen === 'presets') {
-      setOpenSections({ presets: true, slate: false, bg: false, adjust: false, ai: false, print: false });
-    } else if (activeScreen === 'adjust') {
-      setOpenSections({ presets: false, slate: true, bg: true, adjust: true, ai: true, print: false });
-    } else if (activeScreen === 'print-sheet') {
-      setOpenSections({ presets: false, slate: false, bg: false, adjust: false, ai: false, print: true });
-    }
-  }, [activeScreen]);
-
-  const containerRef = useRef<HTMLDivElement>(null);
-  const dragStartRef = useRef<{ x: number; y: number; cropX: number; cropY: number; clothingX: number; clothingY: number } | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
-
-  // Wheel to zoom cropScale or clothingScale
-  const cropScaleRef = useRef(cropScale);
-  const clothingScaleRef = useRef(clothingScale);
-  
-  useEffect(() => { cropScaleRef.current = cropScale; }, [cropScale]);
-  useEffect(() => { clothingScaleRef.current = clothingScale; }, [clothingScale]);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const handleWheelNative = (e: WheelEvent) => {
-      if (!imageData) return;
-      e.preventDefault();
-      const zoomSpeed = 0.04;
-      const delta = e.deltaY < 0 ? 1 : -1;
-
-      if (canvasActiveItem === 'clothing' && clothingTemplate !== 'none') {
-        const newScale = Math.round(clothingScaleRef.current * (1 + delta * zoomSpeed));
-        onClothingScaleChange(Math.min(Math.max(newScale, 30), 300));
-      } else {
-        const newScale = Math.round(cropScaleRef.current * (1 + delta * zoomSpeed));
-        onCropScaleChange(Math.min(Math.max(newScale, 30), 300));
-      }
-    };
-
-    container.addEventListener('wheel', handleWheelNative, { passive: false });
+    let cancelled = false;
+    loadFaceLandmarker()
+      .then(() => {
+        if (!cancelled) setFaceModelsLoaded(true);
+      })
+      .catch((err) => {
+        console.error('Face model failed to load:', err);
+        if (!cancelled) {
+          setMessage({ text: 'Face detection is unavailable. You can still position the photo by hand.', type: 'info' });
+        }
+      });
     return () => {
-      container.removeEventListener('wheel', handleWheelNative);
+      cancelled = true;
     };
-  }, [imageData, canvasActiveItem, clothingTemplate, onCropScaleChange, onClothingScaleChange]);
-
-  // Load face-api models offline
-  useEffect(() => {
-    const loadModels = async () => {
-      try {
-        const faceapi = await import('face-api.js');
-        // Loads tiny + landmarks, and SSD MobileNet only if its shards are fully
-        // present (sharper box when available; graceful tiny fallback otherwise).
-        await ensureFaceModels(faceapi);
-        setFaceModelsLoaded(true);
-      } catch (err) {
-        console.error('Error loading face-api models:', err);
-        setMessage({ text: 'Biometric face models loading skipped. Manual positioning active.', type: 'info' });
-      }
-    };
-    loadModels();
   }, []);
 
-  // Auto-run face align when original image changes or preset standard changes
-  const autoAlignedRef = useRef<string | null>(null);
-  const lastPresetRef = useRef<string>(preset);
+  // Auto-align when a new photo arrives or the document standard changes.
+  // Remembered at module level so leaving and re-entering the editor (e.g.
+  // Back to the start screen) never re-aligns over the operator's own tweaks.
+  const autoAlignedRef = autoAlignMemory.image;
+  const lastPresetRef = autoAlignMemory.preset;
+  // The crop the last auto-align produced; if the operator hasn't touched it
+  // since, a later (better) analysis may silently refine it.
+  const lastAutoViewRef = useRef<string | null>(null);
+  const viewKey = `${cropPosition.x}|${cropPosition.y}|${cropScale}|${rotation}`;
+
   useEffect(() => {
     const isImageChanged = originalImage && autoAlignedRef.current !== originalImage;
-    const isPresetChanged = lastPresetRef.current !== preset;
+    const isPresetChanged = !!lastPresetRef.current && lastPresetRef.current !== preset;
 
     if (originalImage && faceModelsLoaded && (isImageChanged || isPresetChanged)) {
       autoAlignedRef.current = originalImage;
       lastPresetRef.current = preset;
-      // Delay slightly to ensure browser canvas ready
-      setTimeout(() => {
-        handleAutoAlign();
-      }, 500);
+      handleAutoAlign();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [originalImage, preset, faceModelsLoaded]);
 
-  // Run face-api detection and align coordinates
-  // Run face-api detection and align coordinates
-  async function handleAutoAlign() {
+  // Keep the measurements in sync with whatever image is on screen:
+  //  - when the cut-out arrives, its alpha mask gives the true top of the
+  //    head, so re-measure (and refine the crop if the operator hasn't
+  //    touched it since auto-align);
+  //  - after a remount (e.g. Back to the start screen), just re-measure.
+  const analyzedImageRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!faceModelsLoaded || !imageData || analyzedImageRef.current === imageData) return;
+    if (originalImage && autoAlignedRef.current !== originalImage) return; // full auto-align pending
+    const untouched = lastAutoViewRef.current === viewKey;
+    const isNewCutout = !!processedImage && imageData === processedImage;
+    handleAutoAlign({ applyCrop: untouched && isNewCutout, quiet: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageData, faceModelsLoaded]);
+
+  // Detect the face, then fit head size / eye line / centring / roll to the preset.
+  async function handleAutoAlign(opts: { applyCrop?: boolean; quiet?: boolean } = {}) {
+    const { applyCrop = true, quiet = false } = opts;
     if (!imageData || !faceModelsLoaded) return;
+    const source = imageData;
+    analyzedImageRef.current = source;
     setIsDetectingFace(true);
-    setMessage({ text: 'Calibrating face landmarks against passport guides...', type: 'info' });
+    if (!quiet) setMessage({ text: 'Finding the face and fitting it to the guides…', type: 'info' });
 
     try {
-      const faceapi = await import('face-api.js');
-      const img = new Image();
-      img.src = imageData;
-      
-      img.onload = async () => {
-        // Prefer the more accurate SSD MobileNet detector; fall back to tiny.
-        const detectorOpts = makeDetectorOptions(faceapi);
+      const face = await analyzeFace(source);
 
-        // Pick the largest detected face (most likely the subject) for robustness.
-        const detections = await faceapi
-          .detectAllFaces(img, detectorOpts as any)
-          .withFaceLandmarks();
-        const detection = detections && detections.length
-          ? detections.reduce((a, b) => (a.detection.box.area >= b.detection.box.area ? a : b))
-          : null;
+      if (!face) {
+        setFaceAnalysis(null);
+        setFaceMissing(true);
+        if (!quiet) setMessage({ text: 'No face found. Drag and zoom the photo to fit the guides by hand.', type: 'warning' });
+        return;
+      }
 
-        if (!detection) {
-          setMessage({ text: 'Biometric Warning: Face not detected. Adjust cropping box manually.', type: 'warning' });
-          setFaceChecklist({
-            detected: false,
-            centered: false,
-            lightingOk: false,
-            rotatedOk: false
-          });
-          setCompliance(null);
-          setIsDetectingFace(false);
-          return;
-        }
+      setFaceMissing(false);
+      setFaceAnalysis(face);
 
-        const box = detection.detection.box;
-        const landmarks = detection.landmarks;
-        const leftEye = landmarks.getLeftEye();
-        const rightEye = landmarks.getRightEye();
-
-        const getCenter = (points: { x: number; y: number }[]) => {
-          const sum = points.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
-          return { x: sum.x / points.length, y: sum.y / points.length };
-        };
-
-        const leftEyeCenter = getCenter(leftEye);
-        const rightEyeCenter = getCenter(rightEye);
-
-        // Preset-aware alignment: scales the head to the selected document's ICAO
-        // head band and drops the eye line into its eye band (verified in
-        // lib/faceAlign unit tests).
-        const p = getPreset(preset);
-        const align = computePassportAlignment({
-          imgW: img.width,
-          imgH: img.height,
-          boxHeight: box.height,
-          faceCenterX: box.x + box.width / 2,
-          leftEye: leftEyeCenter,
-          rightEye: rightEyeCenter,
-          preset: p,
-          headBoxExpansion: HEAD_BOX_EXPANSION,
-        });
-
-        const angleDeg = align.rotationDeg; // roll, already sign-corrected for display below
-        const pctX = Math.round(((box.x + box.width / 2) / img.width) * 100);
-        const boxHeightRatio = box.height / img.height;
-
+      if (applyCrop) {
+        const align = computePassportAlignment(face, getPreset(preset));
         onCropPositionChange({ x: align.cropX, y: align.cropY });
         onCropScaleChange(align.cropScale);
-        if (onRotationChange) onRotationChange(align.rotationDeg);
+        onRotationChange?.(align.rotationDeg);
+        lastAutoViewRef.current = `${align.cropX}|${align.cropY}|${align.cropScale}|${align.rotationDeg}`;
 
-        const isRotatedOk = Math.abs(angleDeg) < 4;
-        const isCentered = pctX > 43 && pctX < 57;
+        // Gently lift under-exposed faces (never darken).
+        if (!quiet && face.luminance > 0 && face.luminance < 140) {
+          onBrightnessChange(100 + Math.min(30, Math.round((145 - face.luminance) * 0.5)));
+        }
+      }
 
-        // Auto brightness simulation
-        let isLightingOk = true;
-        let faceLuminance = 0;
-        try {
-          const tempCanvas = document.createElement('canvas');
-          const tempCtx = tempCanvas.getContext('2d');
-          if (tempCtx) {
-            const faceX = Math.max(0, Math.round(box.x));
-            const faceY = Math.max(0, Math.round(box.y));
-            const faceW = Math.min(img.width - faceX, Math.round(box.width));
-            const faceH = Math.min(img.height - faceY, Math.round(box.height));
-            if (faceW > 0 && faceH > 0) {
-              tempCanvas.width = faceW;
-              tempCanvas.height = faceH;
-              tempCtx.drawImage(img, faceX, faceY, faceW, faceH, 0, 0, faceW, faceH);
-              const imgData = tempCtx.getImageData(0, 0, faceW, faceH);
-              const data = imgData.data;
-              let sumL = 0;
-              for (let i = 0; i < data.length; i += 16) {
-                sumL += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-              }
-              const avgL = sumL / (data.length / 16);
-              faceLuminance = avgL;
-              isLightingOk = avgL >= 115 && avgL <= 210;
-              if (avgL < 140) {
-                onBrightnessChange(100 + Math.min(30, Math.round((145 - avgL) * 0.5)));
-              }
-            }
-          }
-        } catch (e) {}
-
-        setFaceChecklist({
-          detected: true,
-          centered: isCentered,
-          lightingOk: isLightingOk,
-          rotatedOk: isRotatedOk
+      if (!quiet) {
+        setMessage({
+          text: face.faceCount > 1
+            ? `Aligned the largest of ${face.faceCount} faces. Check it is the right person.`
+            : 'Face aligned to the passport guides.',
+          type: face.faceCount > 1 ? 'warning' : 'success',
         });
-
-        setCompliance({
-          faceBoxRatio: boxHeightRatio,
-          tiltDeg: angleDeg,
-          centerX: pctX,
-          faceLuminance,
-        });
-
-        setMessage({ text: 'AI alignment parameters completed successfully.', type: 'success' });
-        onSnapshot?.();
-      };
+      }
+      if (applyCrop) onSnapshot?.();
     } catch (err) {
-      setMessage({ text: 'AI Face detection models failed to compute.', type: 'error' });
+      console.error('Face analysis failed:', err);
+      if (!quiet) setMessage({ text: 'Face detection failed. You can still position the photo by hand.', type: 'error' });
     } finally {
       setIsDetectingFace(false);
     }
-  };
-
-  // Drag-to-pan handlers
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (!imageData) return;
-    setIsDragging(true);
-    dragStartRef.current = {
-      x: e.clientX,
-      y: e.clientY,
-      cropX: cropPosition.x,
-      cropY: cropPosition.y,
-      clothingX: clothingPosition.x,
-      clothingY: clothingPosition.y,
-    };
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging || !dragStartRef.current || !containerRef.current) return;
-    const dx = e.clientX - dragStartRef.current.x;
-    const dy = e.clientY - dragStartRef.current.y;
-    const width = containerRef.current.clientWidth;
-    const height = containerRef.current.clientHeight;
-
-    if (canvasActiveItem === 'clothing' && clothingTemplate !== 'none') {
-      // Scale translation speed
-      const scaleMultiplier = 0.5;
-      const newX = dragStartRef.current.clothingX + (dx / width) * 100 * scaleMultiplier;
-      const newY = dragStartRef.current.clothingY + (dy / height) * 100 * scaleMultiplier;
-      onClothingPositionChange({
-        x: Math.min(Math.max(newX, 0), 100),
-        y: Math.min(Math.max(newY, 0), 100)
-      });
-    } else {
-      const pctDx = (dx / width) * 100;
-      const pctDy = (dy / height) * 100;
-      onCropPositionChange({
-        x: Math.min(Math.max(dragStartRef.current.cropX - pctDx, 0), 100),
-        y: Math.min(Math.max(dragStartRef.current.cropY - pctDy, 0), 100)
-      });
-    }
-  };
-
-  const handleMouseUpOrLeave = () => {
-    if (isDragging) {
-      setIsDragging(false);
-      dragStartRef.current = null;
-      onSnapshot?.();
-    }
-  };
+  }
 
   const handleEnhanceClick = () => {
     if (!isEnhanced) {
@@ -504,14 +361,14 @@ export default function ImageEditor({
       onSaturationChange(105);
       if (onExposureChange) onExposureChange(102);
       setIsEnhanced(true);
-      setMessage({ text: 'AI enhancements active.', type: 'success' });
+      setMessage({ text: 'Auto enhance on.', type: 'success' });
     } else {
       onBrightnessChange(100);
       onContrastChange(100);
       onSaturationChange(100);
       if (onExposureChange) onExposureChange(100);
       setIsEnhanced(false);
-      setMessage({ text: 'AI enhancements removed.', type: 'info' });
+      setMessage({ text: 'Auto enhance off.', type: 'info' });
     }
     onSnapshot?.();
   };
@@ -519,65 +376,24 @@ export default function ImageEditor({
   const handleRetouchClick = () => {
     if (!isRetouched) {
       setIsRetouched(true);
-      setMessage({ text: 'AI Skin Smoothing retouches active.', type: 'success' });
+      setMessage({ text: 'Skin softening on.', type: 'success' });
     } else {
       setIsRetouched(false);
-      setMessage({ text: 'AI Skin Smoothing retouches disabled.', type: 'info' });
+      setMessage({ text: 'Skin softening off.', type: 'info' });
     }
     onSnapshot?.();
   };
 
-  const getAspectRatioStyle = () => {
-    const p = getPreset(preset);
-    return { aspectRatio: `${p.widthMm} / ${p.heightMm}` };
-  };
-
-  // ---- Live ICAO compliance report -------------------------------------
-  // Estimates how well the current framing meets the selected document
-  // standard. Head-size updates live as the Scale Zoom slider changes; the
-  // other metrics come from the last face detection (Auto-Align). Clearly an
-  // estimate — the detector box is expanded to approximate crown-to-chin.
-  type ComplianceStatus = 'pass' | 'warn' | 'fail';
-  interface ComplianceCheck { label: string; status: ComplianceStatus; detail: string; }
-  // HEAD_BOX_EXPANSION is imported from lib/faceAlign so the meter and the
-  // auto-aligner share one source of truth.
-
-  const getComplianceReport = (): { checks: ComplianceCheck[]; overall: ComplianceStatus } | null => {
-    if (!compliance) return null;
-    const p = getPreset(preset);
-
-    // Head height as a % of the photo, applying the live zoom.
-    const headPct = Math.round(compliance.faceBoxRatio * HEAD_BOX_EXPANSION * cropScale);
-    const headStatus: ComplianceStatus =
-      headPct >= p.headMinPct && headPct <= p.headMaxPct ? 'pass'
-        : headPct >= p.headMinPct - 6 && headPct <= p.headMaxPct + 6 ? 'warn'
-          : 'fail';
-
-    // Head tilt (roll). The app auto-corrects rotation, so small values are fine.
-    const absTilt = Math.abs(compliance.tiltDeg);
-    const tiltStatus: ComplianceStatus = absTilt <= 3 ? 'pass' : absTilt <= 10 ? 'warn' : 'fail';
-
-    // Horizontal centering of the face.
-    const cx = compliance.centerX;
-    const centerStatus: ComplianceStatus =
-      cx >= 44 && cx <= 56 ? 'pass' : cx >= 38 && cx <= 62 ? 'warn' : 'fail';
-
-    // Even facial lighting (average luminance 0-255).
-    const lum = Math.round(compliance.faceLuminance);
-    const lightStatus: ComplianceStatus =
-      lum >= 130 && lum <= 205 ? 'pass' : lum >= 110 && lum <= 225 ? 'warn' : 'fail';
-
-    const checks: ComplianceCheck[] = [
-      { label: 'Head size', status: headStatus, detail: `${headPct}% · target ${p.headMinPct}–${p.headMaxPct}%` },
-      { label: 'Head straight', status: tiltStatus, detail: `${compliance.tiltDeg > 0 ? '+' : ''}${compliance.tiltDeg}° tilt` },
-      { label: 'Centered', status: centerStatus, detail: `${cx}% from left` },
-      { label: 'Even lighting', status: lightStatus, detail: lum >= 130 && lum <= 205 ? 'balanced' : lum < 130 ? 'a bit dark' : 'a bit bright' },
-    ];
-    const overall: ComplianceStatus = checks.some(c => c.status === 'fail') ? 'fail'
-      : checks.some(c => c.status === 'warn') ? 'warn' : 'pass';
-    return { checks, overall };
-  };
-  const complianceReport = getComplianceReport();
+  // ---- Live compliance report ------------------------------------------
+  // Recomputed on every render from the last face analysis + current crop.
+  const complianceReport = faceAnalysis
+    ? evaluateCompliance(
+        faceAnalysis,
+        getPreset(preset),
+        { cropX: cropPosition.x, cropY: cropPosition.y, cropScale, rotationDeg: rotation },
+        { backgroundRemoved: !!processedImage },
+      )
+    : null;
 
   const filterStyle = {
     filter: `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%) brightness(${exposure}%) ${
@@ -607,38 +423,80 @@ export default function ImageEditor({
     transition: (isDragging && canvasActiveItem === 'clothing') ? 'none' : 'transform 0.15s ease-out',
   };
 
+  // ---- Guide geometry from the selected document's real spec --------------
+  const spec = getPreset(preset);
+  const frameAspect = spec.widthMm / spec.heightMm;
+  const headMid = (spec.headMinPct + spec.headMaxPct) / 2;
+  const eyeMid = (spec.eyeMinPct + spec.eyeMaxPct) / 2;
+  // Crown→eye is roughly 47% of crown→chin, so the oval is anchored on the eye line.
+  const ovalTop = eyeMid - headMid * 0.47;
+  const ovalWidth = (headMid * 0.66) / frameAspect;
+  // Guide colour reflects framing only (size, eye line, centring, tilt) —
+  // expression or background issues shouldn't make the guides look wrong.
+  const framing = complianceReport?.checks.filter((c) => ['head', 'eyes-level', 'center', 'tilt'].includes(c.id)) ?? [];
+  const framingStatus = framing.some((c) => c.status === 'fail') ? 'fail' : framing.some((c) => c.status === 'warn') ? 'warn' : 'pass';
+  const guideColor = !complianceReport
+    ? faceMissing ? '#DC2626' : '#2F6FD0'
+    : framingStatus === 'pass' ? '#16A34A' : framingStatus === 'warn' ? '#D97706' : '#DC2626';
+
+  const warmthOverlay =
+    temperature !== 0
+      ? {
+          backgroundColor: temperature > 0
+            ? `rgba(245, 158, 11, ${Math.abs(temperature) / 250})`
+            : `rgba(59, 130, 246, ${Math.abs(temperature) / 250})`,
+          mixBlendMode: 'color' as const,
+        }
+      : null;
+
+  const BACKDROPS = [
+    { name: 'White', value: '#FFFFFF' },
+    { name: 'Off-white / light grey', value: '#F5F5F5' },
+    { name: 'Light blue', value: '#A1CAF1' },
+    { name: 'Royal blue', value: '#0A5C9E' },
+    { name: 'Red', value: '#D32F2F' },
+  ];
+  const isCustomBackdrop = !BACKDROPS.some((c) => c.value === bgColor.toUpperCase());
+
   return (
-    <div className="w-full h-full flex bg-bg-app text-white overflow-hidden select-none">
-      {/* Invisible triggers linked to global header buttons */}
-      <button id="ai-auto-align-trigger" className="hidden" onClick={handleAutoAlign} />
+    <div className="w-full h-full flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden panel-scrollbar">
+      {/* Invisible triggers linked to the toolbar / keyboard shortcuts */}
+      <button id="ai-auto-align-trigger" className="hidden" onClick={() => handleAutoAlign()} />
       <button id="ai-enhance-trigger" className="hidden" onClick={handleEnhanceClick} />
       <button id="ai-retouch-trigger" className="hidden" onClick={handleRetouchClick} />
 
-      {/* 1. Center Workspace Area (45-50% width) */}
-      <div className="flex-1 flex flex-col justify-between items-center h-full overflow-hidden p-4 relative bg-bg-app border-r border-border-app">
-        
-        {/* Messages */}
-        <div className="w-full flex flex-col items-center gap-1 shrink-0 select-none z-10">
-          {message && (
-            <div className={`w-full max-w-lg p-2.5 rounded-xl border flex justify-between items-start text-xs shrink-0 transition-all ${
-              message.type === 'success' ? 'bg-success-app/10 border-success-app text-success-app' :
-              message.type === 'error' ? 'bg-danger-app/10 border-danger-app text-danger-app' :
-              message.type === 'warning' ? 'bg-accent-app/10 border-accent-app text-accent-app' :
-              'bg-card-app border-border-app text-text-secondary'
-            }`}>
-              <div className="font-semibold">{message.text}</div>
-              <button onClick={() => setMessage(null)} className="text-neutral-400 hover:text-white ml-2 cursor-pointer flex items-center justify-center">
-                <FiX className="w-3.5 h-3.5" />
-              </button>
+      {/* ── Canvas area ───────────────────────────────────────── */}
+      <div className="relative shrink-0 lg:shrink lg:flex-1 min-w-0 flex flex-col items-center justify-center px-4 pt-14 pb-6 lg:pt-14 bg-bg-app min-h-[58dvh] lg:min-h-0 lg:h-full [--fh:44dvh] [--fw:74vw] sm:[--fw:60vw] lg:[--fh:min(64dvh,620px)] lg:[--fw:calc(100vw-600px)]">
+        {/* Status line */}
+        {message && activeScreen !== 'print-sheet' && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 max-w-[90%] animate-fadeIn">
+            <div
+              className={`flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-[13px] elevate-md bg-card-app ${
+                message.type === 'success'
+                  ? 'border-success-app/40 text-success-app'
+                  : message.type === 'error'
+                    ? 'border-danger-app/40 text-danger-app'
+                    : message.type === 'warning'
+                      ? 'border-warning-app/40 text-warning-app'
+                      : 'border-border-app text-text-secondary'
+              }`}
+            >
+              {isDetectingFace && (
+                <span className="w-3.5 h-3.5 rounded-full border-2 border-current/30 border-t-current animate-spin shrink-0" />
+              )}
+              <span className="truncate">{message.text}</span>
+              {(message.type === 'warning' || message.type === 'error') && (
+                <button onClick={() => setMessage(null)} aria-label="Dismiss" className="opacity-70 hover:opacity-100 cursor-pointer">
+                  <FiX className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Viewport Canvas container */}
-        <div className="relative flex items-center justify-center my-auto w-full select-none py-3 min-h-[300px] flex-1">
-          {activeScreen === 'print-sheet' ? (
-            /* Print sheet preview grid */
-            (() => {
+        {activeScreen === 'print-sheet' ? (
+          <div className="w-full flex items-center justify-center">
+            {(() => {
               const specs = PRESET_PIXELS[preset as keyof typeof PRESET_PIXELS] || PRESET_PIXELS.us;
               let pw = specs.widthMm;
               let ph = specs.heightMm;
@@ -711,7 +569,7 @@ export default function ImageEditor({
 
               return (
                 <div 
-                  className="relative w-full max-w-[220px] xl:max-w-[260px] bg-white border border-slate-200 rounded shadow-2xl flex flex-col justify-between overflow-hidden select-none transition-all duration-300"
+                  className="relative w-[min(78vw,340px)] lg:w-[min(30vw,400px)] bg-white border border-slate-200 rounded shadow-2xl flex flex-col justify-between overflow-hidden select-none transition-all duration-300"
                   style={{
                     aspectRatio: `${actualPageW} / ${actualPageH}`
                   }}
@@ -865,187 +723,158 @@ export default function ImageEditor({
 
                 </div>
               );
-            })()
-          ) : (
-            /* Single Crop Canvas View with Biometric Overlay guides */
-            <>
-              {/* Biometric guides indicators (Left Side) */}
-              <div className="absolute left-[-110px] top-[15px] bottom-[15px] w-[95px] pointer-events-none hidden xl:block select-none font-sans">
-                <div className="absolute top-[15%] -translate-y-1/2 right-0 flex items-center gap-1.5 text-[11px] font-bold text-neutral-400">
-                  <span className="w-2 h-2 rounded-full bg-accent-app shadow-[0_0_6px_var(--accent-app)]" /> Head Top
-                </div>
-                <div className="absolute top-[38%] -translate-y-1/2 right-0 flex items-center gap-1.5 text-[11px] font-bold text-neutral-400">
-                  <span className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_6px_#3b82f6]" /> Eye Line
-                </div>
-                <div className="absolute top-[53%] -translate-y-1/2 right-0 flex items-center gap-1.5 text-[11px] font-bold text-neutral-400">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_6px_#10b981]" /> Nose Line
-                </div>
-                <div className="absolute top-[72%] -translate-y-1/2 right-0 flex items-center gap-1.5 text-[11px] font-bold text-neutral-400">
-                  <span className="w-2 h-2 rounded-full bg-slate-500 shadow-[0_0_6px_rgba(255,255,255,0.2)]" /> Chin Line
-                </div>
-              </div>
-
-              {/* Passport crop boundary box */}
-              <div 
+            })()}
+          </div>
+        ) : (
+          <>
+            <div className="relative">
+              {/* Photo frame at the document's exact aspect ratio */}
+              <div
                 ref={containerRef}
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUpOrLeave}
-                onMouseLeave={handleMouseUpOrLeave}
-                className={`relative w-full max-w-[210px] xl:max-w-[250px] 2xl:max-w-[290px] max-h-[44vh] xl:max-h-[48vh] overflow-hidden rounded-2xl border select-none shadow-2xl transition-all duration-300 z-10 ${
-                  canvasActiveItem === 'clothing' ? 'border-accent-app ring-2 ring-accent-app/20 cursor-move' : 'border-border-app cursor-move'
-                }`}
-                style={{ 
+                className={`touch-none-canvas relative overflow-hidden rounded-sm select-none elevate-lg ring-1 ${
+                  editingClothing ? 'ring-2 ring-accent-app' : 'ring-black/10'
+                } ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+                style={{
                   backgroundColor: bgColor,
-                  ...getAspectRatioStyle()
+                  aspectRatio: `${spec.widthMm} / ${spec.heightMm}`,
+                  height: `min(var(--fh), calc(var(--fw) * ${(1 / frameAspect).toFixed(4)}))`,
                 }}
               >
                 {imageData ? (
-                  <div className="w-full h-full relative">
+                  <>
                     <img
                       src={imageData}
-                      alt="Biometric Portrait"
-                      style={filterStyle}
+                      alt="Portrait being edited"
+                      draggable={false}
+                      style={{ ...filterStyle, willChange: 'transform' }}
                       className="absolute left-1/2 top-1/2 w-full h-full object-cover pointer-events-none"
                     />
 
-                    {/* Clothing template overlay layer */}
+                    {/* Warmth tint — same blend the exporter applies */}
+                    {warmthOverlay && <div className="absolute inset-0 pointer-events-none z-[5]" style={warmthOverlay} />}
+
                     {clothingTemplate !== 'none' && (
-                      <img
-                        src={getClothingPath()}
-                        alt="Clothing Overlay"
-                        style={clothingStyle}
-                        className="absolute pointer-events-none"
-                      />
+                      <img src={getClothingPath()} alt="" draggable={false} style={clothingStyle} className="absolute pointer-events-none" />
                     )}
 
-                    {/* Slate Overlay */}
                     {showSlate && (
-                      <div 
-                        className="absolute bottom-0 left-0 right-0 bg-white border-t border-neutral-300 text-black text-center select-none font-sans font-bold z-20 flex flex-col justify-center"
+                      <div
+                        className="absolute bottom-0 left-0 right-0 bg-white border-t border-neutral-300 text-black text-center font-sans font-bold z-20 flex flex-col justify-center"
                         style={{ height: '16%' }}
                       >
-                        <div className="w-full px-1 truncate" style={{ fontSize: 'calc(4px + 1vw)', lineHeight: '1.1' }}>
+                        <div className="w-full px-1 truncate" style={{ fontSize: 'clamp(8px, 1.6vh, 15px)', lineHeight: '1.1' }}>
                           {slateName ? slateName.toUpperCase() : '[CANDIDATE NAME]'}
                         </div>
-                        <div className="w-full px-1 truncate mt-0.5 text-neutral-700" style={{ fontSize: 'calc(3px + 0.8vw)', lineHeight: '1.1' }}>
+                        <div className="w-full px-1 truncate mt-0.5 text-neutral-700" style={{ fontSize: 'clamp(7px, 1.3vh, 12px)', lineHeight: '1.1' }}>
                           {slateDate ? slateDate.toUpperCase() : '[DATE OF PHOTO]'}
                         </div>
                       </div>
                     )}
 
-                    {/* Custom Border Overlay */}
                     {showBorder && (
-                      <div 
+                      <div
                         className="absolute inset-0 pointer-events-none z-20"
                         style={{
-                          border: `calc(${borderSize} * (100% / ${PRESET_PIXELS[preset as keyof typeof PRESET_PIXELS]?.widthMm || 35})) solid ${borderColor}`,
-                          boxSizing: 'border-box'
+                          border: `calc(${borderSize} * (100% / ${spec.widthMm})) solid ${borderColor}`,
+                          boxSizing: 'border-box',
                         }}
                       />
                     )}
-                  </div>
+                  </>
                 ) : (
-                  <div className="absolute inset-0 flex items-center justify-center text-neutral-500 text-xs">
-                    No image loaded
-                  </div>
+                  <div className="absolute inset-0 flex items-center justify-center text-neutral-500 text-xs">No photo</div>
                 )}
 
-                {/* Biometric Horizontal guidelines */}
-                <div className="absolute left-0 right-0 top-[15%] border-t border-dashed border-accent-app/70 pointer-events-none z-20" />
-                <div className="absolute left-0 right-0 top-[38%] border-t border-dashed border-blue-500/70 pointer-events-none z-20" />
-                <div className="absolute left-0 right-0 top-[53%] border-t border-dashed border-emerald-500/70 pointer-events-none z-20" />
-                <div className="absolute left-0 right-0 top-[72%] border-t border-dashed border-neutral-400/40 pointer-events-none z-20" />
-
-                {/* Biometric Face Silhouette Overlay */}
-                {imageData && (
-                  <div 
-                    className="absolute inset-0 pointer-events-none z-10 biometric-guide-pulse flex items-center justify-center"
-                    style={{ 
-                      '--pulse-color': (faceChecklist.detected && faceChecklist.centered && faceChecklist.rotatedOk && faceChecklist.lightingOk) ? '#16A34A' : '#DC2626' 
-                    } as any}
-                  >
-                    <svg viewBox="0 0 100 100" className="w-[72%] h-[72%] opacity-40">
-                      <ellipse cx="50" cy="45" rx="21" ry="27" fill="none" stroke={(faceChecklist.detected && faceChecklist.centered && faceChecklist.rotatedOk && faceChecklist.lightingOk) ? '#16A34A' : '#DC2626'} strokeWidth="1.2" strokeDasharray="3 3" />
-                      <line x1="20" y1="41" x2="80" y2="41" stroke={(faceChecklist.detected && faceChecklist.centered && faceChecklist.rotatedOk && faceChecklist.lightingOk) ? '#16A34A' : '#DC2626'} strokeWidth="0.8" strokeDasharray="2 3" />
-                      <line x1="50" y1="10" x2="50" y2="90" stroke={(faceChecklist.detected && faceChecklist.centered && faceChecklist.rotatedOk && faceChecklist.lightingOk) ? '#16A34A' : '#DC2626'} strokeWidth="0.6" strokeDasharray="2 3" />
-                      <line x1="25" y1="72" x2="75" y2="72" stroke={(faceChecklist.detected && faceChecklist.centered && faceChecklist.rotatedOk && faceChecklist.lightingOk) ? '#16A34A' : '#DC2626'} strokeWidth="0.8" strokeDasharray="2 3" />
-                    </svg>
-                  </div>
-                )}
-
-                {/* Canvas Active Item Badge */}
-                <div className="absolute bottom-2 left-2 bg-neutral-900/90 border border-border-app text-[10px] text-white px-2 py-0.5 rounded backdrop-blur select-none font-bold z-25">
-                  Preset: {PRESETS[preset as keyof typeof PRESETS]?.name.split(' / ')[0]}
-                </div>
-
-                {clothingTemplate !== 'none' && (
-                  <div className="absolute bottom-2 right-2 bg-accent-app/90 border border-accent-hover text-[10px] text-white px-2 py-0.5 rounded backdrop-blur select-none font-bold z-25">
-                    Editing: {canvasActiveItem === 'clothing' ? 'Formal Suit' : 'Photo'}
+                {/* Guides: eye zone, head outline and centre line for this document */}
+                {imageData && activeScreen === 'adjust' && (
+                  <div className="absolute inset-0 pointer-events-none z-10 biometric-guide-pulse">
+                    <div
+                      className="absolute left-0 right-0"
+                      style={{
+                        top: `${spec.eyeMinPct}%`,
+                        height: `${spec.eyeMaxPct - spec.eyeMinPct}%`,
+                        backgroundColor: `${guideColor}1F`,
+                        borderTop: `1px dashed ${guideColor}`,
+                        borderBottom: `1px dashed ${guideColor}`,
+                      }}
+                    />
+                    <div className="absolute top-0 bottom-0 left-1/2 border-l border-dashed" style={{ borderColor: `${guideColor}99` }} />
+                    <div
+                      className="absolute rounded-[50%] border-[1.5px] border-dashed"
+                      style={{
+                        top: `${ovalTop}%`,
+                        height: `${headMid}%`,
+                        left: `${50 - ovalWidth / 2}%`,
+                        width: `${ovalWidth}%`,
+                        borderColor: guideColor,
+                      }}
+                    />
                   </div>
                 )}
               </div>
 
-              {/* Physical Height dimension scale indicator (right side) */}
-              <div className="absolute right-[-24px] top-[15px] bottom-[15px] w-6 flex items-center justify-center pointer-events-none select-none">
-                <div className="absolute top-0 bottom-0 w-[1px] bg-border-app" />
-                <div className="absolute top-0 -translate-x-1/2 left-1/2 border-b-[5px] border-b-neutral-500 border-x-[4px] border-x-transparent" />
-                <div className="absolute bottom-0 -translate-x-1/2 left-1/2 border-t-[5px] border-t-neutral-500 border-x-[4px] border-x-transparent" />
-                <div className="absolute left-[10px] bg-neutral-900 border border-border-app px-1.5 py-0.5 text-[10px] font-bold text-neutral-400 rounded whitespace-nowrap z-20">
-                  {PRESETS[preset as keyof typeof PRESETS]?.height || 45} mm
-                </div>
+              {/* Physical size rulers */}
+              <div className="absolute left-0 right-0 -bottom-6 flex items-center gap-1.5 text-[11px] text-text-secondary pointer-events-none">
+                <span className="flex-1 h-px bg-border-app" />
+                <span className="tabular-nums">{spec.widthMm} mm</span>
+                <span className="flex-1 h-px bg-border-app" />
               </div>
-
-              {/* Physical Width dimension scale indicator (bottom side) */}
-              <div className="absolute bottom-[2px] left-[20px] right-[20px] h-6 flex items-center justify-center pointer-events-none select-none">
-                <div className="absolute left-0 right-0 h-[1px] bg-border-app" />
-                <div className="absolute left-0 -translate-y-1/2 top-1/2 border-r-[5px] border-r-neutral-500 border-y-[4px] border-y-transparent" />
-                <div className="absolute right-0 -translate-y-1/2 top-1/2 border-l-[5px] border-l-neutral-500 border-y-[4px] border-y-transparent" />
-                <div className="absolute top-[8px] bg-neutral-900 border border-border-app px-1.5 py-0.5 text-[10px] font-bold text-neutral-400 rounded whitespace-nowrap z-20">
-                  {PRESETS[preset as keyof typeof PRESETS]?.width || 35} mm
-                </div>
+              <div className="absolute top-0 bottom-0 -right-7 flex flex-col items-center gap-1.5 text-[11px] text-text-secondary pointer-events-none">
+                <span className="flex-1 w-px bg-border-app" />
+                <span className="tabular-nums [writing-mode:vertical-rl] rotate-180">{spec.heightMm} mm</span>
+                <span className="flex-1 w-px bg-border-app" />
               </div>
-            </>
-          )}
-        </div>
-
-        {/* Tip text */}
-        <div className="flex flex-col items-center gap-1 shrink-0 select-none pb-1 relative z-10 text-[13px] text-neutral-400 font-semibold mt-3">
-          {clothingTemplate !== 'none' ? (
-            <div className="flex gap-4">
-              <span><BsMouse className="w-3.5 h-3.5 inline mr-1 text-neutral-400" /> Drag Photo / Suit to adjust</span>
-              <span>• Scroll to Zoom active item</span>
-              <span className="text-accent-app">Active Selection: {canvasActiveItem === 'clothing' ? 'Formal Suit' : 'Photo'}</span>
             </div>
-          ) : (
-            <span><BsMouse className="w-3.5 h-3.5 inline mr-1 text-neutral-400" /> Drag photo to reposition • Scroll to Zoom</span>
-          )}
-        </div>
+
+            <div className="mt-10 flex flex-col items-center gap-2 text-[13px] text-text-secondary text-center">
+              {clothingTemplate !== 'none' && (
+                <div className="inline-flex rounded-md border border-border-app bg-card-app p-0.5" role="group" aria-label="What to move">
+                  {(['photo', 'clothing'] as const).map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => onCanvasActiveItemChange(item)}
+                      aria-pressed={canvasActiveItem === item}
+                      className={`px-3 py-1 rounded text-[13px] cursor-pointer transition-colors ${
+                        canvasActiveItem === item ? 'bg-accent-app text-white' : 'text-text-secondary hover:text-text-primary'
+                      }`}
+                    >
+                      Move {item === 'photo' ? 'photo' : 'outfit'}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <span>
+                <FiMove className="inline w-3.5 h-3.5 mr-1 -mt-0.5" />
+                Drag to move · scroll or pinch to zoom
+              </span>
+              {activeScreen === 'adjust' && imageData && (
+                <span className="flex items-center gap-3 text-[12px]">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-3 h-2 rounded-[1px]" style={{ backgroundColor: `${guideColor}40`, border: `1px dashed ${guideColor}` }} /> Eyes here
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-3 rounded-[50%] border border-dashed" style={{ borderColor: guideColor }} /> Head outline
+                  </span>
+                </span>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
-      {/* 2. Right Settings Panel (360px) */}
-      <aside className="w-[360px] border-l border-border-app bg-panel-app flex flex-col h-full overflow-hidden shrink-0 select-none z-20">
-        <div className="flex-1 overflow-y-auto panel-scrollbar p-4 space-y-4 h-full pb-20">
-          
-          {/* STEP 1: Presets selection panel */}
+      {/* ── Settings panel ───────────────────────────────────── */}
+      <aside className="w-full lg:w-[380px] shrink-0 border-t lg:border-t-0 lg:border-l border-border-app bg-panel-app lg:h-full lg:overflow-y-auto panel-scrollbar">
+        <div className="p-4 space-y-4 pb-8">
+          {/* STEP: document size */}
           {activeScreen === 'presets' && (
-            <div className="space-y-4">
-              <div className="space-y-1">
-                <h3 className="text-[17px] font-bold text-accent-app flex items-center gap-1.5">
-                  <FaRuler className="w-5 h-5 text-accent-app" /> 1. Select Size Standard
-                </h3>
-                <p className="text-[12px] text-text-secondary">
-                  Choose the document photo preset standard for your customer.
-                </p>
-              </div>
+            <>
+              <PanelIntro title="Choose the document" text="The photo size and face position rules follow this choice." />
 
-              {/* Visual presets cards grid */}
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                {Object.entries(PRESETS).map(([key, data]) => {
-                  const isActive = preset === key;
+              <div className="grid grid-cols-2 gap-2">
+                {Object.keys(PRESETS).map((key) => {
                   const meta = getPreset(key);
-                  const customLabel = meta.label;
-
+                  const isActive = preset === key;
                   return (
                     <button
                       key={key}
@@ -1054,95 +883,138 @@ export default function ImageEditor({
                         onPresetChange(key);
                         onSnapshot?.();
                       }}
-                      className={`p-3 rounded-xl border text-left cursor-pointer transition-all flex flex-col justify-between h-[90px] relative overflow-hidden select-none group ${
+                      aria-pressed={isActive}
+                      className={`p-3 rounded-lg border text-left cursor-pointer transition-colors flex flex-col gap-1.5 min-h-[76px] ${
                         isActive
-                          ? 'bg-accent-app/10 border-accent-app shadow-lg shadow-accent-app/5 ring-1 ring-accent-app/50'
-                          : 'bg-card-app border-border-app hover:bg-panel-app hover:border-border-app'
+                          ? 'bg-accent-app/8 border-accent-app ring-1 ring-accent-app'
+                          : 'bg-card-app border-border-app hover:border-text-secondary/50'
                       }`}
                     >
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <CountryFlag code={meta.country} className="w-5 h-3.5 rounded-[2px] shrink-0 shadow-sm ring-1 ring-black/10" />
-                          <span className={`text-[11px] font-black tracking-wider truncate uppercase ${isActive ? 'text-accent-app' : 'text-neutral-400 group-hover:text-text-primary'}`}>
-                            {customLabel}
-                          </span>
-                        </div>
-                        <p className="text-[9px] text-text-secondary font-semibold mt-1 line-clamp-2">
-                          {data.name.split(' / ')[0]}
-                        </p>
-                      </div>
-                      <div className="text-[9px] font-bold text-accent-app bg-accent-app/10 px-1.5 py-0.5 rounded w-max select-none">
-                        {data.width} × {data.height} mm
-                      </div>
+                      <span className="flex items-center gap-2 min-w-0">
+                        <CountryFlag code={meta.country} className="w-5 h-3.5 rounded-[2px] shrink-0 ring-1 ring-black/10" />
+                        <span className={`text-[13px] font-medium leading-tight line-clamp-2 ${isActive ? 'text-accent-app' : 'text-text-primary'}`}>
+                          {meta.label}
+                        </span>
+                      </span>
+                      <span className="text-[12px] text-text-secondary tabular-nums">
+                        {meta.widthMm} × {meta.heightMm} mm
+                      </span>
                     </button>
                   );
                 })}
               </div>
 
-              {/* Preset specs card */}
-              <div className="bg-card-app border border-border-app rounded-xl p-4 text-[13px] text-text-secondary space-y-2.5">
-                <h4 className="text-[11px] font-black uppercase tracking-widest text-accent-app">Preset Biometrics Specs</h4>
-                <div className="flex justify-between border-b border-border-app/40 pb-1.5">
-                  <span>Width × Height:</span>
-                  <span className="text-text-primary font-bold">{PRESET_PIXELS[preset as keyof typeof PRESET_PIXELS]?.widthMm} × {PRESET_PIXELS[preset as keyof typeof PRESET_PIXELS]?.heightMm} mm</span>
-                </div>
-                <div className="flex justify-between border-b border-border-app/40 pb-1.5">
-                  <span>Aspect Ratio:</span>
-                  <span className="text-text-primary font-bold">{PRESET_PIXELS[preset as keyof typeof PRESET_PIXELS]?.ratio}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Printed Grid Capacity:</span>
-                  <span className="text-text-primary font-bold">{PRESET_PIXELS[preset as keyof typeof PRESET_PIXELS]?.cols} × {PRESET_PIXELS[preset as keyof typeof PRESET_PIXELS]?.rows} photos</span>
-                </div>
-              </div>
-            </div>
+              <Card title={spec.name}>
+                <dl className="text-[13px] divide-y divide-border-app/70">
+                  {[
+                    ['Photo size', `${spec.widthMm} × ${spec.heightMm} mm`],
+                    ['Head height', `${spec.headMinPct}–${spec.headMaxPct}% of photo`],
+                    ['Eye line', `${spec.eyeMinPct}–${spec.eyeMaxPct}% from top`],
+                    ['Print resolution', `${PRESET_PIXELS[preset]?.widthPx} × ${PRESET_PIXELS[preset]?.heightPx} px @ 300 DPI`],
+                  ].map(([k, v]) => (
+                    <div key={k} className="flex justify-between gap-3 py-1.5">
+                      <dt className="text-text-secondary">{k}</dt>
+                      <dd className="text-text-primary font-medium text-right">{v}</dd>
+                    </div>
+                  ))}
+                  <div className="flex justify-between items-center gap-3 py-1.5">
+                    <dt className="text-text-secondary">Suggested background</dt>
+                    <dd className="flex items-center gap-1.5 font-medium">
+                      <span className="w-4 h-4 rounded-full border border-border-app" style={{ backgroundColor: spec.bgColor }} />
+                      {spec.bgColor}
+                    </dd>
+                  </div>
+                </dl>
+              </Card>
+            </>
           )}
 
-          {/* STEP 2: Adjust & Cutout panel */}
+          {/* STEP: edit */}
           {activeScreen === 'adjust' && (
-            <div className="space-y-4">
-              <div className="space-y-1">
-                <h3 className="text-[17px] font-bold text-accent-app flex items-center gap-1.5">
-                  <FiSliders className="w-5 h-5 text-accent-app" /> 2. Edit & Biometrics
-                </h3>
-                <p className="text-[12px] text-text-secondary">
-                  Remove background, adjust crop alignment, and apply formal clothing.
-                </p>
-              </div>
+            <>
+              <PanelIntro title="Edit & check" text="Fix anything flagged below, then continue to printing." />
 
-              {/* Background Color & Removal */}
-              <div className="bg-card-app border border-border-app rounded-xl p-4 space-y-3.5">
-                <div className="flex items-center justify-between border-b border-border-app/40 pb-2">
-                  <span className="text-[12px] font-bold text-text-primary uppercase tracking-wider">
-                    Background Settings
-                  </span>
-                  {!processedImage && (
-                    <span className="text-[10px] text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded font-black uppercase tracking-wider animate-pulse">
-                      Background Not Cut
+              {/* Live photo check */}
+              <Card
+                title="Photo check"
+                aside={
+                  complianceReport ? (
+                    <span
+                      className={`text-[12px] font-medium px-2 py-0.5 rounded-md ${
+                        complianceReport.overall === 'pass'
+                          ? 'bg-success-app/12 text-success-app'
+                          : complianceReport.overall === 'warn'
+                            ? 'bg-warning-app/12 text-warning-app'
+                            : 'bg-danger-app/12 text-danger-app'
+                      }`}
+                    >
+                      {complianceReport.passed}/{complianceReport.checks.length} passed
                     </span>
-                  )}
-                </div>
-                
-                {/* AI Cutout */}
-                <div className="w-full">
-                  {bgRemover}
-                </div>
+                  ) : null
+                }
+              >
+                {complianceReport ? (
+                  <ul className="space-y-2">
+                    {complianceReport.checks.map((c) => {
+                      const Icon = c.status === 'pass' ? FiCheckCircle : c.status === 'warn' ? FiAlertTriangle : FiXCircle;
+                      const tone = c.status === 'pass' ? 'text-success-app' : c.status === 'warn' ? 'text-warning-app' : 'text-danger-app';
+                      return (
+                        <li key={c.id} className="flex items-start gap-2.5 text-[13px]">
+                          <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${tone}`} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex justify-between gap-2">
+                              <span className="font-medium text-text-primary">{c.label}</span>
+                              <span className="text-text-secondary text-right tabular-nums">{c.detail}</span>
+                            </div>
+                            {c.status !== 'pass' && c.hint && <p className={`text-[12px] ${tone}`}>{c.hint}</p>}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p className="text-[13px] text-text-secondary flex items-center gap-2">
+                    {faceMissing ? (
+                      <>
+                        <FiAlertTriangle className="w-4 h-4 text-warning-app shrink-0" /> No face found — position the photo by hand.
+                      </>
+                    ) : (
+                      <>
+                        <span className="w-3.5 h-3.5 rounded-full border-2 border-accent-app/30 border-t-accent-app animate-spin shrink-0" />
+                        {faceModelsLoaded ? 'Checking the photo…' : 'Loading face model…'}
+                      </>
+                    )}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  disabled={!faceModelsLoaded || isDetectingFace}
+                  onClick={() => handleAutoAlign()}
+                  className="studio-btn studio-btn-secondary w-full"
+                >
+                  <FaMagic className="w-4 h-4 text-accent-app" />
+                  {isDetectingFace ? 'Aligning…' : 'Auto-align face'}
+                </button>
+              </Card>
 
-                {/* Swatches */}
+              {/* Background */}
+              <Card
+                title="Background"
+                aside={
+                  !processedImage ? (
+                    <span className="text-[12px] font-medium text-warning-app bg-warning-app/12 px-2 py-0.5 rounded-md">Not removed</span>
+                  ) : (
+                    <span className="text-[12px] font-medium text-success-app bg-success-app/12 px-2 py-0.5 rounded-md">Removed</span>
+                  )
+                }
+              >
+                {bgRemover}
                 {processedImage && (
-                  <div className="space-y-2 animate-fadeIn">
-                    <label className="text-[11px] font-black text-neutral-400 uppercase tracking-widest pl-0.5">
-                      Backdrop Colors
-                    </label>
-                    <div className="flex flex-wrap items-center gap-3">
-                      {[
-                        { name: 'White (Govt Exams / UPSC)', value: '#FFFFFF' },
-                        { name: 'Sky Blue (Passport Standard)', value: '#A1CAF1' },
-                        { name: 'Royal Blue (Corporate / School)', value: '#0A5C9E' },
-                        { name: 'Light Gray (Official IDs)', value: '#F5F5F5' },
-                        { name: 'Traditional Red', value: '#D32F2F' },
-                      ].map((color) => {
-                        const isActive = bgColor.toUpperCase() === color.value.toUpperCase();
+                  <div className="space-y-2 pt-1">
+                    <span className="text-[13px] font-medium text-text-secondary">Backdrop colour</span>
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      {BACKDROPS.map((color) => {
+                        const isActive = bgColor.toUpperCase() === color.value;
                         return (
                           <button
                             key={color.value}
@@ -1152,363 +1024,163 @@ export default function ImageEditor({
                               onSnapshot?.();
                             }}
                             title={color.name}
-                            className={`w-8 h-8 rounded-full border transition-all cursor-pointer relative ${
-                              isActive 
-                                ? 'border-accent-app scale-110 ring-2 ring-accent-app/20' 
-                                : 'border-border-app hover:scale-105'
+                            aria-label={color.name}
+                            aria-pressed={isActive}
+                            className={`w-8 h-8 rounded-full border cursor-pointer transition-shadow ${
+                              isActive ? 'border-accent-app ring-2 ring-accent-app ring-offset-2 ring-offset-card-app' : 'border-border-app'
                             }`}
                             style={{ backgroundColor: color.value }}
-                          >
-                            {isActive && (
-                              <span className="absolute inset-0 m-auto w-2 h-2 rounded-full bg-accent-app" />
-                            )}
-                          </button>
+                          />
                         );
                       })}
-                      
-                      {/* Pipette custom */}
-                      <div className="relative">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            document.getElementById('adjust-pipette-picker')?.click();
-                          }}
-                          title="Custom Color"
-                          className={`w-8 h-8 rounded-full border transition-all flex items-center justify-center bg-gradient-to-tr from-indigo-500 via-amber-500 to-pink-500 cursor-pointer hover:scale-105`}
-                        >
-                          {!['#FFFFFF', '#A1CAF1', '#0A5C9E', '#F5F5F5', '#D32F2F'].includes(bgColor.toUpperCase()) && (
-                            <span className="w-4.5 h-4.5 rounded-full border border-white/40" style={{ backgroundColor: bgColor }} />
-                          )}
-                        </button>
+                      <label
+                        title="Custom colour"
+                        className={`relative w-8 h-8 rounded-full border cursor-pointer overflow-hidden bg-[conic-gradient(red,yellow,lime,cyan,blue,magenta,red)] ${
+                          isCustomBackdrop ? 'ring-2 ring-accent-app ring-offset-2 ring-offset-card-app border-accent-app' : 'border-border-app'
+                        }`}
+                      >
+                        {isCustomBackdrop && (
+                          <span className="absolute inset-1.5 rounded-full border border-white/60" style={{ backgroundColor: bgColor }} />
+                        )}
                         <input
-                          id="adjust-pipette-picker"
                           type="color"
-                          value={['#FFFFFF', '#A1CAF1', '#0A5C9E', '#F5F5F5', '#D32F2F'].includes(bgColor.toUpperCase()) ? '#FFFFFF' : bgColor}
-                          onChange={(e) => {
-                            onBgColorChange(e.target.value);
-                          }}
+                          aria-label="Custom backdrop colour"
+                          value={isCustomBackdrop ? bgColor : '#FFFFFF'}
+                          onChange={(e) => onBgColorChange(e.target.value)}
                           onBlur={() => onSnapshot?.()}
-                          className="absolute inset-0 opacity-0 w-8 h-8 pointer-events-none"
+                          className="absolute inset-0 opacity-0 cursor-pointer"
                         />
-                      </div>
+                      </label>
                     </div>
                   </div>
                 )}
-              </div>
+              </Card>
 
-              {/* AI & Retouch Tools */}
-              <div className="bg-card-app border border-border-app rounded-xl p-4 space-y-3 animate-fadeIn">
-                <div className="flex items-center justify-between border-b border-border-app/40 pb-2">
-                  <span className="text-[12px] font-bold text-text-primary uppercase tracking-wider">
-                    AI & Retouch Tools
-                  </span>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-2.5">
-                  {/* Skin Retouch */}
-                  <button
-                    type="button"
-                    onClick={handleRetouchClick}
-                    className={`py-2.5 px-3 rounded-xl border text-[12px] font-extrabold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                      isRetouched 
-                        ? 'bg-pink-500/15 border-pink-500 text-pink-400 shadow shadow-pink-500/10' 
-                        : 'bg-panel-app border-border-app text-text-secondary hover:text-text-primary hover:bg-border-app'
-                    }`}
-                  >
-                    <FaPaintBrush className={`w-3.5 h-3.5 ${isRetouched ? 'text-pink-400' : 'text-neutral-400'}`} />
-                    <span>Skin Retouch</span>
-                    {isRetouched && <FiCheckCircle className="w-3.5 h-3.5 text-pink-400 ml-0.5" />}
-                  </button>
+              {/* Position */}
+              <Card title="Position & size">
+                <CropSlider label="Zoom" min={MIN_CROP_SCALE} max={MAX_CROP_SCALE} value={cropScale} onChange={onCropScaleChange} onMouseUp={onSnapshot} />
+                {onRotationChange && (
+                  <CropSlider label="Rotate" min={-30} max={30} step={0.5} value={rotation} suffix="°" onChange={onRotationChange} onMouseUp={onSnapshot} />
+                )}
+                <CropSlider
+                  label="Left / right"
+                  min={MIN_CROP_POS}
+                  max={MAX_CROP_POS}
+                  value={cropPosition.x}
+                  onChange={(val) => onCropPositionChange({ ...cropPosition, x: val })}
+                  onMouseUp={onSnapshot}
+                />
+                <CropSlider
+                  label="Up / down"
+                  min={MIN_CROP_POS}
+                  max={MAX_CROP_POS}
+                  value={cropPosition.y}
+                  onChange={(val) => onCropPositionChange({ ...cropPosition, y: val })}
+                  onMouseUp={onSnapshot}
+                />
+              </Card>
 
-                  {/* Auto Enhance */}
+              {/* Light & colour */}
+              <Card title="Light & colour">
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={handleEnhanceClick}
-                    className={`py-2.5 px-3 rounded-xl border text-[12px] font-extrabold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                      isEnhanced 
-                        ? 'bg-accent-app/15 border-accent-app text-accent-app shadow shadow-accent-app/10' 
-                        : 'bg-panel-app border-border-app text-text-secondary hover:text-text-primary hover:bg-border-app'
-                    }`}
+                    aria-pressed={isEnhanced}
+                    className={`studio-btn !px-2 text-[14px] ${isEnhanced ? 'bg-accent-app/10 border-accent-app text-accent-app' : 'studio-btn-secondary'}`}
                   >
-                    <FiSliders className={`w-3.5 h-3.5 ${isEnhanced ? 'text-accent-app' : 'text-neutral-400'}`} />
-                    <span>Auto Enhance</span>
-                    {isEnhanced && <FiCheckCircle className="w-3.5 h-3.5 text-accent-app ml-0.5" />}
+                    <FiSun className="w-4 h-4" /> Auto enhance
                   </button>
-
-                  {/* Auto Align */}
                   <button
                     type="button"
-                    disabled={!faceModelsLoaded || isDetectingFace}
-                    onClick={handleAutoAlign}
-                    className={`col-span-2 py-2.5 px-3 rounded-xl border text-[12.5px] font-extrabold transition-all flex items-center justify-center gap-2 cursor-pointer ${
-                      isDetectingFace 
-                        ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400 cursor-wait' 
-                        : 'bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500 hover:bg-emerald-500/20 text-emerald-400'
-                    }`}
+                    onClick={handleRetouchClick}
+                    aria-pressed={isRetouched}
+                    className={`studio-btn !px-2 text-[14px] ${isRetouched ? 'bg-accent-app/10 border-accent-app text-accent-app' : 'studio-btn-secondary'}`}
                   >
-                    {isDetectingFace ? (
-                      <svg className="animate-spin h-4 w-4 text-emerald-400" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                      </svg>
-                    ) : (
-                      <FaMagic className="w-3.5 h-3.5 text-emerald-400" />
-                    )}
-                    <span>AI Auto-Align Face & Biometrics</span>
+                    <FaPaintBrush className="w-3.5 h-3.5" /> Soften skin
                   </button>
                 </div>
-              </div>
-
-              {/* ICAO Compliance Report */}
-              {complianceReport && (
-                <div className="bg-card-app border border-border-app rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between border-b border-border-app/40 pb-2">
-                    <span className="text-[12px] font-bold text-text-primary uppercase tracking-wider flex items-center gap-1.5">
-                      <FiCheckCircle className="w-3.5 h-3.5 text-accent-app" /> Compliance Check
-                    </span>
-                    <span
-                      className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${
-                        complianceReport.overall === 'pass'
-                          ? 'bg-emerald-500/15 text-emerald-400'
-                          : complianceReport.overall === 'warn'
-                            ? 'bg-amber-500/15 text-amber-400'
-                            : 'bg-red-500/15 text-red-400'
-                      }`}
-                    >
-                      {complianceReport.overall === 'pass' ? 'Ready' : complianceReport.overall === 'warn' ? 'Review' : 'Fix Needed'}
-                    </span>
+                <details className="group">
+                  <summary className="text-[13px] font-medium text-text-secondary cursor-pointer flex justify-between items-center list-none py-1 hover:text-text-primary">
+                    Manual adjustments
+                    <FiChevronDown className="w-4 h-4 transition-transform group-open:rotate-180" />
+                  </summary>
+                  <div className="space-y-3 pt-2">
+                    <CropSlider label="Brightness" min={50} max={150} value={brightness} onChange={onBrightnessChange} onMouseUp={onSnapshot} />
+                    <CropSlider label="Contrast" min={50} max={150} value={contrast} onChange={onContrastChange} onMouseUp={onSnapshot} />
+                    <CropSlider label="Saturation" min={50} max={150} value={saturation} onChange={onSaturationChange} onMouseUp={onSnapshot} />
+                    {onExposureChange && (
+                      <CropSlider label="Exposure" min={50} max={150} value={exposure} onChange={onExposureChange} onMouseUp={onSnapshot} />
+                    )}
+                    {onTemperatureChange && (
+                      <CropSlider label="Warmth" min={-50} max={50} value={temperature} suffix="" onChange={onTemperatureChange} onMouseUp={onSnapshot} />
+                    )}
                   </div>
-                  <div className="space-y-1.5">
-                    {complianceReport.checks.map((c) => (
-                      <div key={c.label} className="flex items-center justify-between text-[12px]">
-                        <span className="flex items-center gap-1.5 text-text-secondary">
-                          <span
-                            className={`w-2 h-2 rounded-full shrink-0 ${
-                              c.status === 'pass' ? 'bg-emerald-400' : c.status === 'warn' ? 'bg-amber-400' : 'bg-red-400'
+                </details>
+              </Card>
+
+              {/* Extras */}
+              <Card title="Extras">
+                <details className="group" open={clothingTemplate !== 'none'}>
+                  <summary className="text-[13px] font-medium text-text-secondary cursor-pointer flex justify-between items-center list-none py-1 hover:text-text-primary">
+                    Formal outfit
+                    <FiChevronDown className="w-4 h-4 transition-transform group-open:rotate-180" />
+                  </summary>
+                  <div className="space-y-3 pt-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      {CLOTHING_TEMPLATES.map((tmpl) => {
+                        const isActive = clothingTemplate === tmpl.id;
+                        return (
+                          <button
+                            key={tmpl.id}
+                            type="button"
+                            aria-pressed={isActive}
+                            onClick={() => {
+                              onClothingTemplateChange(tmpl.id);
+                              onCanvasActiveItemChange(tmpl.id !== 'none' ? 'clothing' : 'photo');
+                              onSnapshot?.();
+                            }}
+                            className={`py-2 px-2 rounded-md border text-[13px] cursor-pointer transition-colors ${
+                              isActive
+                                ? 'bg-accent-app/10 border-accent-app text-accent-app font-medium'
+                                : 'bg-card-app border-border-app text-text-primary hover:border-text-secondary/50'
                             }`}
-                          />
-                          <span className="font-semibold text-text-primary">{c.label}</span>
-                        </span>
-                        <span
-                          className={`font-bold tabular-nums ${
-                            c.status === 'pass' ? 'text-emerald-400' : c.status === 'warn' ? 'text-amber-400' : 'text-red-400'
-                          }`}
-                        >
-                          {c.detail}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="text-[10px] text-text-secondary leading-snug pt-1 border-t border-border-app/30">
-                    Estimate for {getPreset(preset).name}. Adjust <span className="font-bold text-text-primary">Scale Zoom</span> to tune head size; re-run Auto-Align after big changes.
-                  </p>
-                </div>
-              )}
-
-              {/* Photo Crop Alignment */}
-              <div className="bg-card-app border border-border-app rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between border-b border-border-app/40 pb-2">
-                  <span className="text-[12px] font-bold text-text-primary uppercase tracking-wider">
-                    Crop & Face Alignment
-                  </span>
-                </div>
-
-                <div className="space-y-3.5">
-                  <CropSlider 
-                    label="Scale Zoom" 
-                    min={30} 
-                    max={250} 
-                    value={cropScale} 
-                    onChange={onCropScaleChange} 
-                    onMouseUp={onSnapshot}
-                  />
-                  
-                  {onRotationChange && (
-                    <CropSlider 
-                      label="Rotate Angle" 
-                      min={-30} 
-                      max={30} 
-                      value={rotation} 
-                      suffix="°" 
-                      onChange={onRotationChange} 
-                      onMouseUp={onSnapshot}
-                    />
-                  )}
-
-                  <div className="pt-2 border-t border-border-app/30 space-y-3.5 mt-2">
-                    <CropSlider 
-                      label="Move Horiz (X)" 
-                      min={0} 
-                      max={100} 
-                      value={cropPosition.x} 
-                      onChange={(val) => onCropPositionChange({ ...cropPosition, x: val })} 
-                      onMouseUp={onSnapshot}
-                    />
-                    <CropSlider 
-                      label="Move Vert (Y)" 
-                      min={0} 
-                      max={100} 
-                      value={cropPosition.y} 
-                      onChange={(val) => onCropPositionChange({ ...cropPosition, y: val })} 
-                      onMouseUp={onSnapshot}
-                    />
-                  </div>
-                </div>
-
-                {/* Accordion for manual color adjustments */}
-                <div className="border-t border-border-app/40 pt-2.5 mt-1 select-none">
-                  <details className="group">
-                    <summary className="text-[11px] font-black text-neutral-400 uppercase tracking-widest pl-0.5 cursor-pointer flex justify-between items-center outline-none list-none select-none">
-                      <span>Advanced Color Tuning</span>
-                      <span className="text-xs transition-transform group-open:rotate-180">▼</span>
-                    </summary>
-                    <div className="space-y-3 pt-3">
-                      <CropSlider 
-                        label="Brightness" 
-                        min={50} 
-                        max={150} 
-                        value={brightness} 
-                        onChange={onBrightnessChange} 
-                        onMouseUp={onSnapshot}
-                      />
-                      <CropSlider 
-                        label="Contrast" 
-                        min={50} 
-                        max={150} 
-                        value={contrast} 
-                        onChange={onContrastChange} 
-                        onMouseUp={onSnapshot}
-                      />
-                      <CropSlider 
-                        label="Saturation" 
-                        min={50} 
-                        max={150} 
-                        value={saturation} 
-                        onChange={onSaturationChange} 
-                        onMouseUp={onSnapshot}
-                      />
-                      {onExposureChange && (
-                        <CropSlider 
-                          label="Exposure" 
-                          min={50} 
-                          max={150} 
-                          value={exposure} 
-                          onChange={onExposureChange} 
+                          >
+                            {tmpl.id === 'none' ? 'None' : tmpl.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {clothingTemplate !== 'none' && (
+                      <>
+                        <CropSlider label="Outfit size" min={40} max={220} value={clothingScale} onChange={onClothingScaleChange} onMouseUp={onSnapshot} />
+                        <CropSlider
+                          label="Outfit left / right"
+                          min={10}
+                          max={90}
+                          value={clothingPosition.x}
+                          onChange={(val) => onClothingPositionChange({ ...clothingPosition, x: val })}
                           onMouseUp={onSnapshot}
                         />
-                      )}
-                      {onTemperatureChange && (
-                        <CropSlider 
-                          label="Color Warmth" 
-                          min={-50} 
-                          max={50} 
-                          value={temperature} 
-                          onChange={onTemperatureChange} 
+                        <CropSlider
+                          label="Outfit up / down"
+                          min={10}
+                          max={90}
+                          value={clothingPosition.y}
+                          onChange={(val) => onClothingPositionChange({ ...clothingPosition, y: val })}
                           onMouseUp={onSnapshot}
                         />
-                      )}
-                    </div>
-                  </details>
-                </div>
-              </div>
-
-              {/* Clothes Template Changer & Slate Overlay */}
-              <div className="bg-card-app border border-border-app rounded-xl p-4 space-y-4">
-                <span className="text-[12px] font-bold text-text-primary uppercase tracking-wider block border-b border-border-app/40 pb-2">
-                  Suits & Biometric Slate
-                </span>
-
-                {/* Clothing Templates Selector */}
-                <div className="space-y-2">
-                  <label className="text-[11px] font-black text-neutral-400 uppercase tracking-widest pl-0.5">
-                    Formal Clothes Change
-                  </label>
-                  
-                  <div className="grid grid-cols-2 gap-2">
-                    {CLOTHING_TEMPLATES.map((tmpl) => {
-                      const isActive = clothingTemplate === tmpl.id;
-                      return (
-                        <button
-                          key={tmpl.id}
-                          type="button"
-                          onClick={() => {
-                            onClothingTemplateChange(tmpl.id);
-                            if (tmpl.id !== 'none') {
-                              onCanvasActiveItemChange('clothing');
-                            } else {
-                              onCanvasActiveItemChange('photo');
-                            }
-                            onSnapshot?.();
-                          }}
-                          className={`py-2 px-2.5 rounded-xl border text-[12px] font-bold transition-all text-center cursor-pointer select-none ${
-                            isActive 
-                              ? 'bg-accent-app/15 border-accent-app text-accent-app shadow' 
-                              : 'bg-card-app border-border-app text-text-secondary hover:text-text-primary hover:bg-panel-app'
-                          }`}
-                        >
-                          {tmpl.name}
-                        </button>
-                      );
-                    })}
+                      </>
+                    )}
                   </div>
-                </div>
+                </details>
 
-                {/* Suit Adjuster Controls (Sliders) */}
-                {clothingTemplate !== 'none' && (
-                  <div className="bg-panel-app/60 border border-border-app/80 p-3 rounded-xl space-y-3.5 animate-fadeIn">
-                    <div className="flex justify-between items-center bg-card-app border border-border-app p-2 rounded-lg">
-                      <span className="text-[11px] font-black text-neutral-400 uppercase tracking-wider">Drag to adjust:</span>
-                      <div className="flex rounded overflow-hidden border border-border-app">
-                        <button
-                          type="button"
-                          onClick={() => onCanvasActiveItemChange('photo')}
-                          className={`px-2 py-0.5 text-[10px] font-bold cursor-pointer transition-colors ${canvasActiveItem === 'photo' ? 'bg-accent-app text-white' : 'bg-panel-app text-text-secondary hover:text-text-primary'}`}
-                        >
-                          Photo
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onCanvasActiveItemChange('clothing')}
-                          className={`px-2 py-0.5 text-[10px] font-bold cursor-pointer transition-colors ${canvasActiveItem === 'clothing' ? 'bg-accent-app text-white' : 'bg-panel-app text-text-secondary hover:text-text-primary'}`}
-                        >
-                          Suit
-                        </button>
-                      </div>
-                    </div>
-
-                    <CropSlider 
-                      label="Suit Scale Size" 
-                      min={40} 
-                      max={220} 
-                      value={clothingScale} 
-                      onChange={onClothingScaleChange} 
-                      onMouseUp={onSnapshot}
-                    />
-                    <CropSlider 
-                      label="Suit Position Horiz" 
-                      min={10} 
-                      max={90} 
-                      value={clothingPosition.x} 
-                      onChange={(val) => onClothingPositionChange({ ...clothingPosition, x: val })} 
-                      onMouseUp={onSnapshot}
-                    />
-                    <CropSlider 
-                      label="Suit Position Vert" 
-                      min={10} 
-                      max={90} 
-                      value={clothingPosition.y} 
-                      onChange={(val) => onClothingPositionChange({ ...clothingPosition, y: val })} 
-                      onMouseUp={onSnapshot}
-                    />
-                  </div>
-                )}
-
-                {/* Exam Slate */}
-                <div className="border-t border-border-app/40 pt-3 space-y-3">
-                  <div className="flex items-center justify-between select-none">
-                    <label htmlFor="enable-slate-cb" className="app-label flex items-center gap-2 cursor-pointer text-[12px] font-bold text-text-primary uppercase tracking-wider">
-                      Govt Exam Slate (Name & DOP)
-                    </label>
+                <div className="border-t border-border-app pt-3 space-y-3">
+                  <label htmlFor="enable-slate-cb" className="flex items-center justify-between gap-3 cursor-pointer">
+                    <span>
+                      <span className="block text-[13px] font-medium text-text-primary">Name &amp; date strip</span>
+                      <span className="block text-[12px] text-text-secondary">For exam forms (UPSC, SSC, etc.)</span>
+                    </span>
                     <input
                       id="enable-slate-cb"
                       type="checkbox"
@@ -1517,85 +1189,86 @@ export default function ImageEditor({
                         onShowSlateChange(e.target.checked);
                         onSnapshot?.();
                       }}
-                      className="w-5 h-5 accent-accent-app rounded border-border-app cursor-pointer"
+                      className="w-5 h-5 accent-accent-app cursor-pointer shrink-0"
                     />
-                  </div>
+                  </label>
 
                   {showSlate && (
-                    <div className="space-y-3.5 pt-2 border-t border-border-app/40 animate-fadeIn">
-                      <div className="flex flex-col gap-1">
-                        <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest pl-0.5">
-                          Candidate Name (UPSC / SSC)
-                        </label>
+                    <div className="space-y-3 animate-fadeIn">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[12px] font-medium text-text-secondary">Candidate name</span>
                         <input
                           type="text"
                           value={slateName}
-                          onChange={(e) => {
-                            onSlateNameChange(e.target.value);
-                            onSnapshot?.();
-                          }}
-                          className="w-full min-h-[40px] px-3 bg-panel-app border border-border-app rounded-lg text-text-primary font-semibold text-[13px] outline-none focus:border-accent-app"
-                          placeholder="E.g. AMIT KUMAR"
+                          onChange={(e) => onSlateNameChange(e.target.value)}
+                          onBlur={() => onSnapshot?.()}
+                          className="w-full h-10 px-3 bg-card-app border border-border-app rounded-md text-text-primary text-[14px] outline-none focus:border-accent-app"
+                          placeholder="e.g. AMIT KUMAR"
                         />
-                      </div>
-
-                      <div className="flex flex-col gap-1">
-                        <div className="flex justify-between items-center pl-0.5">
-                          <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">
-                            Photo Date (DOP)
-                          </label>
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="flex justify-between items-center text-[12px] font-medium text-text-secondary">
+                          Photo date
                           <button
                             type="button"
                             onClick={() => {
                               const d = new Date();
                               const day = String(d.getDate()).padStart(2, '0');
                               const month = String(d.getMonth() + 1).padStart(2, '0');
-                              const year = d.getFullYear();
-                              onSlateDateChange(`DOP: ${day}/${month}/${year}`);
+                              onSlateDateChange(`DOP: ${day}/${month}/${d.getFullYear()}`);
                               onSnapshot?.();
                             }}
-                            className="text-[10px] font-bold text-accent-app hover:text-accent-hover bg-accent-app/10 px-2 py-0.5 rounded cursor-pointer transition-colors"
+                            className="text-[12px] text-accent-app hover:underline cursor-pointer"
                           >
-                            ⚡ Fill Today&apos;s Date
+                            Use today
                           </button>
-                        </div>
+                        </span>
                         <input
                           type="text"
                           value={slateDate}
-                          onChange={(e) => {
-                            onSlateDateChange(e.target.value);
-                            onSnapshot?.();
-                          }}
-                          className="w-full min-h-[40px] px-3 bg-panel-app border border-border-app rounded-lg text-text-primary font-semibold text-[13px] outline-none focus:border-accent-app"
-                          placeholder="E.g. DOP: 12/06/2026"
+                          onChange={(e) => onSlateDateChange(e.target.value)}
+                          onBlur={() => onSnapshot?.()}
+                          className="w-full h-10 px-3 bg-card-app border border-border-app rounded-md text-text-primary text-[14px] outline-none focus:border-accent-app"
+                          placeholder="e.g. DOP: 12/06/2026"
                         />
-                      </div>
+                      </label>
                     </div>
                   )}
                 </div>
-              </div>
-            </div>
+              </Card>
+            </>
           )}
 
-          {/* STEP 3: Print layout setup */}
+          {/* STEP: print */}
           {activeScreen === 'print-sheet' && (
-            <div className="space-y-4">
-              <div className="space-y-1">
-                <h3 className="text-[17px] font-bold text-accent-app flex items-center gap-1.5">
-                  <FiPrinter className="w-5 h-5 text-accent-app" /> 3. Layout & Export
-                </h3>
-                <p className="text-[12px] text-text-secondary">
-                  Configure the sheet margins, slots to skip, and export the document.
-                </p>
-              </div>
-              
+            <>
+              <PanelIntro title="Print sheet" text="Choose paper and copies, then export a print-ready PDF." />
               {downloadButton}
-            </div>
+            </>
           )}
-
         </div>
       </aside>
-
     </div>
+  );
+}
+
+function PanelIntro({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="space-y-0.5">
+      <h2 className="app-section-title">{title}</h2>
+      <p className="text-[13px] text-text-secondary">{text}</p>
+    </div>
+  );
+}
+
+function Card({ title, aside, children }: { title: string; aside?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section className="bg-card-app border border-border-app rounded-lg p-4 space-y-3 elevate-sm">
+      <header className="flex items-center justify-between gap-2">
+        <h3 className="text-[14px] font-semibold text-text-primary">{title}</h3>
+        {aside}
+      </header>
+      {children}
+    </section>
   );
 }

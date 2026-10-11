@@ -40,8 +40,7 @@ export default function MultiPersonPanel({
         // Auto-remove background
         const processed = await removeBackground(
           rawImage,
-          'isnet_fp16',
-          'gpu',
+          'auto',
           (p) => setProgressMap(prev => ({ ...prev, [slotIndex]: p })),
         );
 

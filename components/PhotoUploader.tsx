@@ -1,6 +1,8 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
-import { FiUploadCloud, FiFolder, FiCamera, FiCheck, FiRefreshCw } from 'react-icons/fi';
+import { FiUploadCloud, FiFolder, FiCamera, FiX } from 'react-icons/fi';
+import { importImageFile, isImageFile } from '@/lib/imageImport';
+import { toast } from '@/lib/toast';
 
 interface PhotoUploaderProps {
   onImageUpload: (imageData: string) => void;
@@ -8,259 +10,211 @@ interface PhotoUploaderProps {
   onProjectLoad?: (projectData: any) => void;
 }
 
+const MAX_FILE_BYTES = 40 * 1024 * 1024;
+
 export default function PhotoUploader({ onImageUpload, onImagesUpload, onProjectLoad }: PhotoUploaderProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [isReading, setIsReading] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  const handleMultipleFiles = (files: FileList) => {
-    if (files.length > 1 && onImagesUpload) {
-      const urls: string[] = [];
-      let loaded = 0;
-      const fileArray = Array.from(files).filter(f => f.type.startsWith('image/'));
-      if (fileArray.length === 0) return;
-      
-      fileArray.forEach((file) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          if (e.target?.result) {
-            urls.push(e.target.result as string);
-          }
-          loaded++;
-          if (loaded === fileArray.length) {
-            onImagesUpload(urls);
-          }
-        };
-        reader.readAsDataURL(file);
-      });
-      return true;
+  const loadProject = async (file: File) => {
+    try {
+      const project = JSON.parse(await file.text());
+      if (project.originalImage && onProjectLoad) onProjectLoad(project);
+      else toast('This file is not a saved project.', 'error');
+    } catch {
+      toast('That project file could not be opened.', 'error');
     }
-    return false;
   };
 
-  const handleFile = (file: File) => {
-    if (file.name.endsWith('.json')) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const project = JSON.parse(e.target?.result as string);
-          if (project.originalImage && onProjectLoad) {
-            onProjectLoad(project);
-          } else {
-            alert('Invalid project file format.');
-          }
-        } catch (err) {
-          alert('Error parsing project file.');
-        }
-      };
-      reader.readAsText(file);
+  const handleFiles = async (list: FileList | File[]) => {
+    const files = Array.from(list);
+    const project = files.find((f) => f.name.toLowerCase().endsWith('.json'));
+    if (project) {
+      await loadProject(project);
       return;
     }
 
-    if (!file.type.startsWith('image/')) {
-      alert('Please upload an image file (PNG, JPG, or WEBP) or a saved project (.json)');
+    const images = files.filter(isImageFile);
+    if (images.length === 0) {
+      toast('Please choose a photo (JPG, PNG or WEBP) or a saved project (.json).', 'warning');
+      return;
+    }
+    const tooBig = images.find((f) => f.size > MAX_FILE_BYTES);
+    if (tooBig) {
+      toast(`“${tooBig.name}” is larger than 40 MB.`, 'warning');
       return;
     }
 
-    if (file.size > 30 * 1024 * 1024) {
-      alert('Image size should be less than 30MB');
-      return;
+    setIsReading(true);
+    try {
+      if (images.length > 1 && onImagesUpload) {
+        const urls = await Promise.all(images.map((f) => importImageFile(f)));
+        onImagesUpload(urls);
+      } else {
+        onImageUpload(await importImageFile(images[0]));
+      }
+    } catch {
+      toast('That photo could not be opened. Try a JPG or PNG.', 'error');
+    } finally {
+      setIsReading(false);
     }
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      onImageUpload(e.target?.result as string);
-    };
-    reader.readAsDataURL(file);
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    const files = e.dataTransfer.files;
-    if (files && files.length > 0) {
-      const handled = handleMultipleFiles(files);
-      if (!handled) {
-        handleFile(files[0]);
-      }
+    if (e.dataTransfer.files?.length) handleFiles(e.dataTransfer.files);
+  };
+
+  const openPicker = () => {
+    if (!isCameraActive) fileInputRef.current?.click();
+  };
+
+  // ── Camera ────────────────────────────────────────────────
+  const startCamera = async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!navigator.mediaDevices?.getUserMedia) {
+      toast('No camera is available on this device.', 'warning');
+      return;
     }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = () => {
-    setIsDragging(false);
-  };
-
-  const handleClick = () => {
-    if (!isCameraActive) {
-      fileInputRef.current?.click();
-    }
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      const handled = handleMultipleFiles(files);
-      if (!handled) {
-        handleFile(files[0]);
-      }
-    }
-  };
-
-  // Webcam controls
-  const startCamera = async (e: React.MouseEvent) => {
-    e.stopPropagation();
     setIsCameraActive(true);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { width: 640, height: 480, facingMode: 'user' } 
+      // Ask for HD; the browser falls back to whatever the camera supports.
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1920 }, height: { ideal: 1080 }, facingMode: 'user' },
+        audio: false,
       });
       setCameraStream(stream);
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play();
+        await videoRef.current.play().catch(() => undefined);
       }
     } catch (err) {
-      console.error('Webcam access error:', err);
-      alert('Could not access your camera. Please check permissions.');
+      console.error('Camera error:', err);
+      toast('Could not open the camera. Check that camera permission is allowed.', 'error');
       setIsCameraActive(false);
     }
   };
 
   const stopCamera = (e?: React.MouseEvent) => {
     e?.stopPropagation();
-    if (cameraStream) {
-      cameraStream.getTracks().forEach(track => track.stop());
-    }
+    cameraStream?.getTracks().forEach((t) => t.stop());
     setCameraStream(null);
     setIsCameraActive(false);
   };
 
   const capturePhoto = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (videoRef.current) {
-      const canvas = document.createElement('canvas');
-      canvas.width = videoRef.current.videoWidth || 640;
-      canvas.height = videoRef.current.videoHeight || 480;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        // Mirror the camera preview locally for a natural experience
-        ctx.translate(canvas.width, 0);
-        ctx.scale(-1, 1);
-        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-        
-        const dataUrl = canvas.toDataURL('image/png');
-        onImageUpload(dataUrl);
-        stopCamera();
-      }
-    }
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    // The live preview is mirrored like a mirror, but the saved photo is not:
+    // official photos must show the face as others see it.
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    onImageUpload(canvas.toDataURL('image/jpeg', 0.95));
+    stopCamera();
   };
 
   useEffect(() => {
     return () => {
-      // Clean up camera stream on unmount
-      if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop());
-      }
+      cameraStream?.getTracks().forEach((t) => t.stop());
     };
   }, [cameraStream]);
 
   return (
     <div
-      onClick={handleClick}
+      onClick={openPicker}
       onDrop={handleDrop}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      className={`
-        relative w-full border border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all duration-200 flex flex-col items-center justify-center min-h-[300px] h-full
-        ${isDragging 
-          ? 'border-accent-app bg-panel-app/40 scale-[1.01] shadow-[0_0_20px_rgba(194,65,12,0.15)]' 
-          : 'border-border-app bg-panel-app/40 hover:border-accent-app/50 hover:bg-panel-app/60 shadow-lg'
-        }
-      `}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsDragging(true);
+      }}
+      onDragLeave={() => setIsDragging(false)}
+      className={`relative w-full border-2 border-dashed rounded-xl p-6 sm:p-8 text-center transition-colors duration-150 flex flex-col items-center justify-center min-h-[260px] ${
+        isCameraActive ? 'cursor-default' : 'cursor-pointer'
+      } ${
+        isDragging
+          ? 'border-accent-app bg-accent-app/5'
+          : 'border-border-app bg-card-app hover:border-accent-app/60'
+      }`}
     >
       <input
         ref={fileInputRef}
         type="file"
         accept="image/*,.json"
         id="welcome-file-input"
-        onChange={handleFileChange}
+        onChange={(e) => {
+          if (e.target.files?.length) handleFiles(e.target.files);
+          e.target.value = '';
+        }}
         className="hidden"
         multiple
       />
-      
+
       {isCameraActive ? (
-        <div className="w-full h-full flex flex-col items-center justify-center space-y-4">
-          <div className="relative w-full aspect-[4/3] max-w-sm rounded-xl overflow-hidden border border-border-app bg-black">
-            <video 
-              ref={videoRef} 
-              className="w-full h-full object-cover scale-x-[-1]" 
-              playsInline 
-              muted 
-            />
-            {/* Silhouette overlay */}
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-40">
-              <svg viewBox="0 0 100 100" className="w-[70%] h-[70%] text-accent-app">
-                <ellipse cx="50" cy="45" rx="20" ry="26" fill="none" stroke="currentColor" strokeWidth="1" strokeDasharray="3 3" />
-                <line x1="50" y1="10" x2="50" y2="90" stroke="currentColor" strokeWidth="0.5" strokeDasharray="2 2" />
-                <line x1="20" y1="41" x2="80" y2="41" stroke="currentColor" strokeWidth="0.5" strokeDasharray="2 2" />
+        <div className="w-full flex flex-col items-center gap-4">
+          <div className="relative w-full max-w-md aspect-[4/3] rounded-lg overflow-hidden bg-black">
+            <video ref={videoRef} className="w-full h-full object-cover -scale-x-100" playsInline muted />
+            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+              <svg viewBox="0 0 100 100" className="w-[70%] h-[70%] text-white/70">
+                <ellipse cx="50" cy="45" rx="20" ry="26" fill="none" stroke="currentColor" strokeWidth="0.8" strokeDasharray="3 3" />
+                <line x1="20" y1="41" x2="80" y2="41" stroke="currentColor" strokeWidth="0.4" strokeDasharray="2 2" />
               </svg>
             </div>
+            <p className="absolute bottom-2 inset-x-0 text-center text-[12px] text-white/90 drop-shadow">
+              Fit your face inside the oval and look at the camera
+            </p>
           </div>
-          
-          <div className="flex gap-2 w-full max-w-xs select-none">
-            <button
-               onClick={capturePhoto}
-               className="flex-1 py-2 bg-accent-app hover:bg-accent-hover text-white font-extrabold rounded-lg text-xs uppercase tracking-wider transition-all duration-150 cursor-pointer shadow-md flex items-center gap-1.5 justify-center"
-             >
-               <FiCheck className="w-3.5 h-3.5" /> Capture
-             </button>
-             <button
-               onClick={stopCamera}
-               className="px-3 py-2 bg-card-app hover:bg-border-app text-text-primary font-bold rounded-lg text-xs uppercase tracking-wider transition-all cursor-pointer border border-border-app"
-             >
-              Cancel
+          <div className="flex gap-2 w-full max-w-xs">
+            <button type="button" onClick={stopCamera} className="studio-btn studio-btn-secondary flex-1">
+              <FiX className="w-4 h-4" /> Cancel
+            </button>
+            <button type="button" onClick={capturePhoto} className="studio-btn studio-btn-primary flex-1">
+              <FiCamera className="w-4 h-4" /> Take photo
             </button>
           </div>
         </div>
       ) : (
         <>
-          {/* Upload SVG Icon */}
-          <div className="w-12 h-12 mb-4 rounded-xl bg-bg-app border border-border-app flex items-center justify-center text-accent-app shadow-inner select-none">
-            <FiUploadCloud className="w-6 h-6 text-accent-app" />
-          </div>
-
-          <h3 className="text-sm font-bold text-text-primary mb-1 select-none">
-            Drag & Drop portrait or project here
+          <span className="w-12 h-12 mb-3 rounded-full bg-accent-app/10 text-accent-app flex items-center justify-center">
+            {isReading ? (
+              <span className="w-5 h-5 rounded-full border-2 border-accent-app/30 border-t-accent-app animate-spin" />
+            ) : (
+              <FiUploadCloud className="w-6 h-6" />
+            )}
+          </span>
+          <h3 className="text-[16px] font-semibold text-text-primary mb-1">
+            {isReading ? 'Opening photo…' : 'Drop a photo here'}
           </h3>
-          <p className="text-[11px] text-text-secondary mb-4 select-none">
-            Supports PNG, JPG, WEBP, or saved project .json (Max 30MB)
+          <p className="text-[13px] text-text-secondary mb-5 max-w-sm">
+            JPG, PNG or WEBP up to 40 MB. Select several photos to make a group sheet, or open a saved project.
           </p>
-
-          {/* Action buttons */}
-          <div className="flex gap-2 max-w-xs w-full select-none justify-center">
+          <div className="flex flex-col sm:flex-row gap-2 w-full max-w-sm justify-center">
             <button
+              type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                handleClick();
+                openPicker();
               }}
-              className="px-4 py-2 bg-accent-app hover:bg-accent-hover text-white font-extrabold rounded-xl text-xs uppercase tracking-wider transition-all shadow-md cursor-pointer flex items-center gap-1.5 justify-center"
+              className="studio-btn studio-btn-primary sm:flex-1"
             >
-              <FiFolder className="w-3.5 h-3.5" />
-              File Upload
+              <FiFolder className="w-4 h-4" /> Choose photo
             </button>
             <button
+              id="uploader-camera-trigger"
+              type="button"
               onClick={startCamera}
-              className="px-4 py-2 bg-card-app border border-border-app hover:bg-border-app text-text-primary font-extrabold rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 justify-center"
+              className="studio-btn studio-btn-secondary sm:flex-1"
             >
-              <FiCamera className="w-3.5 h-3.5 text-accent-app" />
-              Use Camera
+              <FiCamera className="w-4 h-4" /> Use camera
             </button>
           </div>
         </>
