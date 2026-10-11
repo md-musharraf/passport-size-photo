@@ -149,3 +149,10 @@ export const PRESET_PIXELS: Record<
     },
   ]),
 );
+
+export const CLOTHING_TEMPLATES = [
+  { id: 'none' as const, name: 'Original', path: '' },
+  { id: 'suit_male' as const, name: 'Male Suit', path: 'clothing/suit_male.png' },
+  { id: 'suit_female' as const, name: 'Female Suit', path: 'clothing/suit_female.png' },
+  { id: 'tuxedo' as const, name: 'Tuxedo', path: 'clothing/tuxedo.png' },
+];

@@ -1,12 +1,12 @@
 "use client";
 import { useState, useEffect, useRef, type ReactNode } from "react";
+import dynamic from "next/dynamic";
 import PhotoUploader from "@/components/PhotoUploader";
-import BGRemover, { removeBackground, warmUpBackgroundModel } from "@/components/BGRemover";
-import ImageEditor from "@/components/ImageEditor";
-import DownloadButton from "@/components/DownloadButton";
-import BatchWorkspace, { BatchItem } from "@/components/BatchWorkspace";
+import type { BatchItem } from "@/components/BatchWorkspace";
 import { useLicense } from "@/components/LicenseProvider";
-import DeveloperContactModal from "@/components/DeveloperContactModal";
+import { removeBackground, warmUpBackgroundModel } from "@/lib/backgroundRemoval";
+import { loadFaceLandmarker } from "@/lib/faceLandmarker";
+import { onIdle, isConstrainedDevice } from "@/lib/device";
 import { getPreset } from "@/lib/presets";
 import { importImageFile } from "@/lib/imageImport";
 import { toast } from "@/lib/toast";
@@ -33,6 +33,53 @@ import { FaUndo, FaRedo, FaPaintBrush, FaMagic } from "react-icons/fa";
 import { BsStars, BsLightbulb } from "react-icons/bs";
 
 export type ScreenState = "welcome" | "presets" | "adjust" | "print-sheet" | "success";
+
+// Everything after the start screen is split into its own chunks so the app
+// opens fast on phones and slow connections. The editor chunks are fetched in
+// the background once the start screen is up (see prefetchEditor), so moving
+// on to the next step still feels instant.
+const loadImageEditor = () => import("@/components/ImageEditor");
+const loadDownloadButton = () => import("@/components/DownloadButton");
+const loadBGRemover = () => import("@/components/BGRemover");
+
+function ScreenLoading() {
+  return (
+    <div className="w-full h-full min-h-[50dvh] flex items-center justify-center" role="status" aria-label="Loading">
+      <span className="w-6 h-6 rounded-full border-2 border-accent-app/25 border-t-accent-app animate-spin" />
+    </div>
+  );
+}
+
+const ImageEditor = dynamic(loadImageEditor, { ssr: false, loading: ScreenLoading });
+const DownloadButton = dynamic(loadDownloadButton, { ssr: false });
+const BGRemover = dynamic(loadBGRemover, { ssr: false });
+const BatchWorkspace = dynamic(() => import("@/components/BatchWorkspace"), { ssr: false, loading: ScreenLoading });
+const DeveloperContactModal = dynamic(() => import("@/components/DeveloperContactModal"), { ssr: false });
+
+let editorPrefetched = false;
+function prefetchEditor() {
+  if (editorPrefetched) return;
+  editorPrefetched = true;
+  Promise.all([loadImageEditor(), loadBGRemover(), loadDownloadButton()]).catch(() => {
+    editorPrefetched = false; // try again on the next photo
+  });
+}
+
+// Once a photo is in, get the AI ready while the operator picks a size: the
+// face model first (auto-align needs it straight away), then the much larger
+// background-removal model. Skipped on data-saver / very slow connections and
+// very low-memory devices, where it would compete with the operator's own work;
+// those load on first use instead.
+let aiWarmupStarted = false;
+function warmUpAI() {
+  if (aiWarmupStarted) return;
+  aiWarmupStarted = true;
+  loadFaceLandmarker()
+    .catch(() => undefined)
+    .then(() => {
+      if (!isConstrainedDevice()) onIdle(() => warmUpBackgroundModel("auto"));
+    });
+}
 
 type ClothingTemplate = "none" | "suit_male" | "suit_female" | "tuxedo";
 
@@ -214,18 +261,13 @@ export default function Home() {
   const [multiPersonImages, setMultiPersonImages] = useState<(string | null)[]>([]);
   const [batchItems, setBatchItems] = useState<BatchItem[]>([]);
 
-  // Warm the AI cutout model up in the background while the operator is still
-  // importing a photo, so the first "Remove Background" feels instant instead of
-  // paying the one-time WASM + model load cost mid-task.
+  // Fetch the editor code in the background once the start screen is up.
+  useEffect(() => onIdle(prefetchEditor), []);
+
+  // Start loading the AI models as soon as there is a photo to work on.
   useEffect(() => {
-    const idle = (window as typeof window & { requestIdleCallback?: (cb: () => void) => number })
-      .requestIdleCallback;
-    const kick = () => {
-      warmUpBackgroundModel("auto");
-    };
-    if (idle) idle(kick);
-    else setTimeout(kick, 1200);
-  }, []);
+    if (originalImage) warmUpAI();
+  }, [originalImage]);
 
   // Sync single image to batch when Multi-Person mode is toggled on
   useEffect(() => {
@@ -823,21 +865,29 @@ export default function Home() {
     }
   }, []);
 
-  // Debounced background auto-save of the working session.
+  // Debounced background auto-save of the working session. Serialising the
+  // photos is a multi-megabyte synchronous write, so it waits for an idle
+  // moment instead of stalling a drag or slider on slower devices.
   useEffect(() => {
     if (!originalImage || autosaveBlockedRef.current) return;
+    let cancelIdle: (() => void) | null = null;
     const t = setTimeout(() => {
-      try {
-        localStorage.setItem(
-          AUTOSAVE_KEY,
-          JSON.stringify({ ...buildProjectData(), savedAt: Date.now() }),
-        );
-      } catch (e) {
-        // Storage quota exceeded (large base64 images) — stop retrying this session.
-        autosaveBlockedRef.current = true;
-      }
+      cancelIdle = onIdle(() => {
+        try {
+          localStorage.setItem(
+            AUTOSAVE_KEY,
+            JSON.stringify({ ...buildProjectData(), savedAt: Date.now() }),
+          );
+        } catch (e) {
+          // Storage quota exceeded (large base64 images) — stop retrying this session.
+          autosaveBlockedRef.current = true;
+        }
+      });
     }, 1200);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      cancelIdle?.();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     originalImage,
@@ -1472,7 +1522,7 @@ export default function Home() {
         className="hidden"
       />
 
-      <DeveloperContactModal isOpen={showHelpModal} onClose={() => setShowHelpModal(false)} />
+      {showHelpModal && <DeveloperContactModal isOpen onClose={() => setShowHelpModal(false)} />}
     </main>
   );
 }

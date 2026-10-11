@@ -96,3 +96,40 @@ export function getDeviceProfile(): Promise<DeviceProfile> {
   })();
   return profilePromise;
 }
+
+/**
+ * Run `fn` when the browser is idle (or after `timeout` ms at the latest), so
+ * background work never competes with input or the first paint. Returns a
+ * function that cancels it.
+ */
+export function onIdle(fn: () => void, timeout = 2000): () => void {
+  if (typeof window === 'undefined') return () => undefined;
+  const w = window as typeof window & {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+    cancelIdleCallback?: (id: number) => void;
+  };
+  if (w.requestIdleCallback && w.cancelIdleCallback) {
+    const id = w.requestIdleCallback(fn, { timeout });
+    return () => w.cancelIdleCallback!(id);
+  }
+  // Safari has no requestIdleCallback.
+  const id = setTimeout(fn, 200);
+  return () => clearTimeout(id);
+}
+
+/**
+ * The user asked to save data, is on a very slow connection, or the device has
+ * very little memory. Optional background downloads (e.g. pre-loading the
+ * 40–90 MB background-removal model) are skipped there and happen on first use.
+ */
+export function isConstrainedDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const nav = navigator as Navigator & {
+    connection?: { saveData?: boolean; effectiveType?: string };
+    deviceMemory?: number;
+  };
+  const conn = nav.connection;
+  if (conn?.saveData) return true;
+  if (conn?.effectiveType && /(^|-)2g$/.test(conn.effectiveType)) return true;
+  return nav.deviceMemory !== undefined && nav.deviceMemory <= 2;
+}

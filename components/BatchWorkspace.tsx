@@ -7,14 +7,15 @@ import {
 } from 'react-icons/fi';
 import { BsStars } from 'react-icons/bs';
 import { FaRuler } from 'react-icons/fa';
-import jsPDF from 'jspdf';
-import { PRESETS, PRESET_PIXELS } from './ImageEditor';
+import { PRESETS, PRESET_PIXELS } from '@/lib/presets';
 import { getPreset } from '@/lib/presets';
 import { computePassportAlignment } from '@/lib/faceAlign';
 import { analyzeFace } from '@/lib/faceLandmarker';
-import { removeBackground } from './BGRemover';
+import { removeBackground } from '@/lib/backgroundRemoval';
 import { importImageFile } from '@/lib/imageImport';
 import BatchEditModal from './BatchEditModal';
+import { loadJsPDF, preloadJsPDF } from '@/lib/pdf';
+import { toast } from '@/lib/toast';
 
 export interface BatchItem {
   id: string;
@@ -205,6 +206,11 @@ export default function BatchWorkspace({
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
   const currentPresetSpecs = PRESET_PIXELS[preset as keyof typeof PRESET_PIXELS] || PRESET_PIXELS.us;
+
+  // The PDF library is loaded on demand; fetch it now so Export is instant.
+  useEffect(() => {
+    preloadJsPDF();
+  }, []);
 
   // Render composite image reactive trigger
   useEffect(() => {
@@ -460,9 +466,16 @@ export default function BatchWorkspace({
   const photoHMm = photoWMm / ratio;
 
   // Print PDF logic
-  const downloadBatchPDF = () => {
+  const downloadBatchPDF = async () => {
     if (batchItems.length === 0) return;
-    
+
+    let jsPDF;
+    try {
+      jsPDF = await loadJsPDF();
+    } catch {
+      toast('Could not load the PDF exporter. Check your connection and try again.', 'error');
+      return;
+    }
     const doc = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',

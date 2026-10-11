@@ -71,6 +71,14 @@ npm run build
 - Imported photos are turned upright (EXIF) and capped at 2400 px, which keeps
   full print quality while making every step faster on low-end PCs.
 - Light and dark themes (follows the system until you choose).
+- Fast first load: only the start screen's code loads up front. The editor is
+  fetched in the background while the start screen is idle, and the PDF
+  library, batch tools and refine tool load when first needed.
+- The AI models start loading once a photo is added (face model first, then
+  background removal). On data-saver, 2G or very low-memory devices the
+  background model is not pre-loaded and downloads on first use instead.
+- The print-sheet preview draws a downscaled copy of the photo in each tile, so
+  sheets with dozens of copies stay smooth on phones.
 
 ## Project layout
 

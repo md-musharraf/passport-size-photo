@@ -1,6 +1,6 @@
 'use client';
 import { useState, useRef } from 'react';
-import { removeBackground } from './BGRemover';
+import { removeBackground } from '@/lib/backgroundRemoval';
 import { FiUpload, FiX, FiUser, FiUsers, FiCheckCircle } from 'react-icons/fi';
 import { BsStars } from 'react-icons/bs';
 

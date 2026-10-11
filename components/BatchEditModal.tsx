@@ -3,10 +3,13 @@ import { useState, useEffect, useRef } from 'react';
 import { FiX, FiCheck, FiSliders, FiSun, FiUser, FiRefreshCw, FiAlertCircle } from 'react-icons/fi';
 import { FaPaintBrush } from 'react-icons/fa';
 import { BsStars } from 'react-icons/bs';
-import { CLOTHING_TEMPLATES } from './ImageEditor';
-import { BatchItem } from './BatchWorkspace';
-import BGRefinerModal from './BGRefinerModal';
-import { removeBackground, type BgQuality } from './BGRemover';
+import dynamic from 'next/dynamic';
+import { CLOTHING_TEMPLATES } from '@/lib/presets';
+import type { BatchItem } from './BatchWorkspace';
+import { removeBackground, type BgQuality } from '@/lib/backgroundRemoval';
+
+// Only fetched when the operator opens the manual refine tool.
+const BGRefinerModal = dynamic(() => import('./BGRefinerModal'), { ssr: false });
 import { MIN_CROP_POS, MAX_CROP_POS } from '@/lib/faceAlign';
 import { usePanZoom } from '@/lib/usePanZoom';
 
@@ -683,16 +686,18 @@ export default function BatchEditModal({
       </div>
 
       {/* Manual background touch up boundary refiner */}
-      <BGRefinerModal
-        isOpen={isRefinerOpen}
-        onClose={() => setIsRefinerOpen(false)}
-        originalImage={item.originalImage}
-        aiTransparentImage={processedImage}
-        onApply={(refined) => {
-          setProcessedImage(refined);
-          setIsRefinerOpen(false);
-        }}
-      />
+      {isRefinerOpen && (
+        <BGRefinerModal
+          isOpen
+          onClose={() => setIsRefinerOpen(false)}
+          originalImage={item.originalImage}
+          aiTransparentImage={processedImage}
+          onApply={(refined) => {
+            setProcessedImage(refined);
+            setIsRefinerOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }
