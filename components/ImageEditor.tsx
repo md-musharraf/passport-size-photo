@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import CropSlider from './CropSlider';
-import { FiCheckCircle, FiAlertTriangle, FiXCircle, FiX, FiSun, FiChevronDown, FiMove } from 'react-icons/fi';
+import { FiCheckCircle, FiAlertTriangle, FiXCircle, FiX, FiSun, FiChevronDown, FiMove, FiSearch } from 'react-icons/fi';
 import { FaPaintBrush, FaMagic } from 'react-icons/fa';
 import CountryFlag from './CountryFlag';
 import { computePassportAlignment, MIN_CROP_POS, MAX_CROP_POS, MIN_CROP_SCALE, MAX_CROP_SCALE } from '@/lib/faceAlign';
@@ -102,7 +102,7 @@ interface ImageEditorProps {
 // Preset specs now live in a single source of truth (lib/presets.ts).
 // Re-exported here so existing imports (`from './ImageEditor'`) keep working.
 export { PRESETS, PRESET_PIXELS, PASSPORT_PRESETS, getPreset, CLOTHING_TEMPLATES } from '@/lib/presets';
-import { PRESETS, PRESET_PIXELS, getPreset, CLOTHING_TEMPLATES } from '@/lib/presets';
+import { PRESETS, PRESET_PIXELS, PASSPORT_PRESETS, getPreset, CLOTHING_TEMPLATES } from '@/lib/presets';
 
 const autoAlignMemory = {
   image: { current: null as string | null },
@@ -207,6 +207,8 @@ export default function ImageEditor({
   // Transient status line shown over the canvas (doesn't shift the layout).
   // Success/info messages fade on their own; warnings/errors stay until closed.
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'info' | 'error' | 'warning' } | null>(null);
+  const [presetFilterCategory, setPresetFilterCategory] = useState<'all' | 'india' | 'international'>('all');
+  const [presetSearch, setPresetSearch] = useState<string>('');
   useEffect(() => {
     if (!message || message.type === 'warning' || message.type === 'error') return;
     const t = setTimeout(() => setMessage(null), 3500);
@@ -429,7 +431,7 @@ export default function ImageEditor({
   // Crown→eye is roughly 47% of crown→chin, so the oval is anchored on the eye line.
   const ovalTop = eyeMid - headMid * 0.47;
   const ovalWidth = (headMid * 0.66) / frameAspect;
-  // Guide colour reflects framing only (size, eye line, centring, tilt) —
+  // Guide colour reflects framing only (size, eye line, centring, tilt):
   // expression or background issues shouldn't make the guides look wrong.
   const framing = complianceReport?.checks.filter((c) => ['head', 'eyes-level', 'center', 'tilt'].includes(c.id)) ?? [];
   const framingStatus = framing.some((c) => c.status === 'fail') ? 'fail' : framing.some((c) => c.status === 'warn') ? 'warn' : 'pass';
@@ -567,7 +569,7 @@ export default function ImageEditor({
 
               return (
                 <div 
-                  className="relative w-[min(78vw,340px)] lg:w-[min(30vw,400px)] bg-white border border-slate-200 rounded shadow-2xl flex flex-col justify-between overflow-hidden select-none transition-all duration-300"
+                  className="relative w-[min(78vw,340px)] lg:w-[min(30vw,400px)] bg-white border border-slate-200 rounded flex flex-col justify-between overflow-hidden select-none transition-all duration-300"
                   style={{
                     aspectRatio: `${actualPageW} / ${actualPageH}`
                   }}
@@ -607,7 +609,7 @@ export default function ImageEditor({
                       return (
                         <div 
                           key={idx}
-                          className="absolute border border-slate-200 overflow-hidden shadow-sm"
+                          className="absolute border border-slate-200 overflow-hidden"
                           style={{
                             left: getPercentW(x),
                             top: getPercentH(y),
@@ -749,7 +751,7 @@ export default function ImageEditor({
                       className="absolute left-1/2 top-1/2 w-full h-full object-cover pointer-events-none"
                     />
 
-                    {/* Warmth tint — same blend the exporter applies */}
+                    {/* Warmth tint: same blend the exporter applies */}
                     {warmthOverlay && <div className="absolute inset-0 pointer-events-none z-[5]" style={warmthOverlay} />}
 
                     {clothingTemplate !== 'none' && (
@@ -866,67 +868,169 @@ export default function ImageEditor({
       <aside className="w-full lg:w-[380px] shrink-0 border-t lg:border-t-0 lg:border-l border-border-app bg-panel-app lg:h-full lg:overflow-y-auto panel-scrollbar">
         <div className="p-4 space-y-4 pb-8">
           {/* STEP: document size */}
-          {activeScreen === 'presets' && (
-            <>
-              <PanelIntro title="Choose the document" text="The photo size and face position rules follow this choice." />
+          {activeScreen === 'presets' && (() => {
+            const allKeys = Object.keys(PASSPORT_PRESETS);
+            const filteredKeys = allKeys.filter((key) => {
+              const p = PASSPORT_PRESETS[key];
+              if (!p) return false;
+              if (presetFilterCategory === 'india' && p.category === 'international') return false;
+              if (presetFilterCategory === 'international' && p.category !== 'international') return false;
+              if (presetSearch.trim()) {
+                const q = presetSearch.toLowerCase();
+                const match =
+                  p.name.toLowerCase().includes(q) ||
+                  p.label.toLowerCase().includes(q) ||
+                  p.key.toLowerCase().includes(q) ||
+                  (p.examNote && p.examNote.toLowerCase().includes(q));
+                if (!match) return false;
+              }
+              return true;
+            });
 
-              <div className="grid grid-cols-2 gap-2">
-                {Object.keys(PRESETS).map((key) => {
-                  const meta = getPreset(key);
-                  const isActive = preset === key;
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => {
-                        onPresetChange(key);
-                        onSnapshot?.();
-                      }}
-                      aria-pressed={isActive}
-                      className={`p-3 rounded-lg border text-left cursor-pointer transition-colors flex flex-col gap-1.5 min-h-[76px] ${
-                        isActive
-                          ? 'bg-accent-app/8 border-accent-app ring-1 ring-accent-app'
-                          : 'bg-card-app border-border-app hover:border-text-secondary/50'
-                      }`}
-                    >
-                      <span className="flex items-center gap-2 min-w-0">
-                        <CountryFlag code={meta.country} className="w-5 h-3.5 rounded-[2px] shrink-0 ring-1 ring-black/10" />
-                        <span className={`text-[13px] font-medium leading-tight line-clamp-2 ${isActive ? 'text-accent-app' : 'text-text-primary'}`}>
-                          {meta.label}
-                        </span>
-                      </span>
-                      <span className="text-[12px] text-text-secondary tabular-nums">
-                        {meta.widthMm} × {meta.heightMm} mm
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+            return (
+              <>
+                <PanelIntro title="Choose the document" text="The photo size, head ratio, and portal guidelines follow this choice." />
 
-              <Card title={spec.name}>
-                <dl className="text-[13px] divide-y divide-border-app/70">
+                {/* Category Tabs */}
+                <div className="flex items-center gap-1 p-1 bg-card-app border border-border-app rounded-xl text-[12px] font-medium">
                   {[
-                    ['Photo size', `${spec.widthMm} × ${spec.heightMm} mm`],
-                    ['Head height', `${spec.headMinPct}–${spec.headMaxPct}% of photo`],
-                    ['Eye line', `${spec.eyeMinPct}–${spec.eyeMaxPct}% from top`],
-                    ['Print resolution', `${PRESET_PIXELS[preset]?.widthPx} × ${PRESET_PIXELS[preset]?.heightPx} px @ 300 DPI`],
-                  ].map(([k, v]) => (
-                    <div key={k} className="flex justify-between gap-3 py-1.5">
-                      <dt className="text-text-secondary">{k}</dt>
-                      <dd className="text-text-primary font-medium text-right">{v}</dd>
+                    { id: 'all', label: 'All' },
+                    { id: 'india', label: '🇮🇳 India Govt & Exams' },
+                    { id: 'international', label: '🌍 International' },
+                  ].map((tab) => {
+                    const active = presetFilterCategory === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setPresetFilterCategory(tab.id as any)}
+                        className={`flex-1 py-1.5 px-2 rounded-lg text-center cursor-pointer transition-all ${
+                          active
+                            ? 'bg-accent-app text-white shadow-sm font-bold'
+                            : 'text-text-secondary hover:text-text-primary'
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Search Bar */}
+                <div className="relative">
+                  <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-secondary" />
+                  <input
+                    type="text"
+                    value={presetSearch}
+                    onChange={(e) => setPresetSearch(e.target.value)}
+                    placeholder="Search UPSC, SSC, NEET, PAN, Passport..."
+                    className="w-full h-9 pl-9 pr-8 bg-card-app border border-border-app rounded-lg text-[13px] text-text-primary placeholder:text-text-secondary/60 outline-none focus:border-accent-app"
+                  />
+                  {presetSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setPresetSearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary cursor-pointer"
+                    >
+                      <FiX className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Preset Cards Grid */}
+                <div className="grid grid-cols-2 gap-2 max-h-[380px] overflow-y-auto panel-scrollbar pr-0.5">
+                  {filteredKeys.length > 0 ? (
+                    filteredKeys.map((key) => {
+                      const meta = getPreset(key);
+                      const isActive = preset === key;
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => {
+                            onPresetChange(key);
+                            if (meta.requiresSlate && !showSlate) {
+                              onShowSlateChange(true);
+                              if (!slateDate) {
+                                const d = new Date();
+                                const day = String(d.getDate()).padStart(2, '0');
+                                const month = String(d.getMonth() + 1).padStart(2, '0');
+                                onSlateDateChange(`DOP: ${day}/${month}/${d.getFullYear()}`);
+                              }
+                            }
+                            onSnapshot?.();
+                          }}
+                          aria-pressed={isActive}
+                          className={`p-2.5 rounded-lg border text-left cursor-pointer transition-colors flex flex-col justify-between gap-1.5 min-h-[82px] ${
+                            isActive
+                              ? 'bg-accent-app/8 border-accent-app ring-1 ring-accent-app'
+                              : 'bg-card-app border-border-app hover:border-text-secondary/50'
+                          }`}
+                        >
+                          <div className="flex items-start gap-1.5 min-w-0">
+                            <CountryFlag code={meta.country} className="w-4 h-3 rounded-[2px] mt-0.5 shrink-0 ring-1 ring-black/10" />
+                            <span className={`text-[12px] font-bold leading-snug line-clamp-2 ${isActive ? 'text-accent-app' : 'text-text-primary'}`}>
+                              {meta.label}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center justify-between gap-1 mt-auto">
+                            <span className="text-[11px] text-text-secondary tabular-nums font-medium">
+                              {meta.widthMm} × {meta.heightMm} mm
+                            </span>
+                            {meta.requiresSlate && (
+                              <span className="text-[9px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-500 font-bold border border-amber-500/30">
+                                Name &amp; DOP
+                              </span>
+                            )}
+                            {meta.targetKbMax && !meta.requiresSlate && (
+                              <span className="text-[9px] px-1 py-0.5 rounded bg-accent-app/10 text-accent-app font-semibold border border-accent-app/20">
+                                Max {meta.targetKbMax}KB
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div className="col-span-2 py-8 text-center text-text-secondary text-[13px]">
+                      No documents found matching &ldquo;{presetSearch}&rdquo;
                     </div>
-                  ))}
-                  <div className="flex justify-between items-center gap-3 py-1.5">
-                    <dt className="text-text-secondary">Suggested background</dt>
-                    <dd className="flex items-center gap-1.5 font-medium">
-                      <span className="w-4 h-4 rounded-full border border-border-app" style={{ backgroundColor: spec.bgColor }} />
-                      {spec.bgColor}
-                    </dd>
-                  </div>
-                </dl>
-              </Card>
-            </>
-          )}
+                  )}
+                </div>
+
+                {/* Selected Preset Details */}
+                <Card title={spec.name}>
+                  {spec.examNote && (
+                    <div className="p-2.5 rounded-md bg-amber-500/10 border border-amber-500/30 text-[12px] text-amber-400 font-medium mb-2 leading-relaxed">
+                      ⚠️ <strong className="font-bold">Official Instruction:</strong> {spec.examNote}
+                    </div>
+                  )}
+                  <dl className="text-[13px] divide-y divide-border-app/70">
+                    {[
+                      ['Photo size', `${spec.widthMm} × ${spec.heightMm} mm (${spec.ratio})`],
+                      ['Head height', `${spec.headMinPct} to ${spec.headMaxPct}% of photo`],
+                      ['Eye line', `${spec.eyeMinPct} to ${spec.eyeMaxPct}% from top`],
+                      ['Print resolution', `${PRESET_PIXELS[preset]?.widthPx || Math.round((spec.widthMm/25.4)*300)} × ${PRESET_PIXELS[preset]?.heightPx || Math.round((spec.heightMm/25.4)*300)} px @ 300 DPI`],
+                      ...(spec.targetKbMax ? [['Government file size', `${spec.targetKbMin || 20} to ${spec.targetKbMax} KB`]] : []),
+                    ].map(([k, v]) => (
+                      <div key={k} className="flex justify-between gap-3 py-1.5">
+                        <dt className="text-text-secondary">{k}</dt>
+                        <dd className="text-text-primary font-medium text-right">{v}</dd>
+                      </div>
+                    ))}
+                    <div className="flex justify-between items-center gap-3 py-1.5">
+                      <dt className="text-text-secondary">Suggested background</dt>
+                      <dd className="flex items-center gap-1.5 font-medium">
+                        <span className="w-4 h-4 rounded-full border border-border-app" style={{ backgroundColor: spec.bgColor }} />
+                        {spec.bgColor}
+                      </dd>
+                    </div>
+                  </dl>
+                </Card>
+              </>
+            );
+          })()}
 
           {/* STEP: edit */}
           {activeScreen === 'adjust' && (
@@ -975,7 +1079,7 @@ export default function ImageEditor({
                   <p className="text-[13px] text-text-secondary flex items-center gap-2">
                     {faceMissing ? (
                       <>
-                        <FiAlertTriangle className="w-4 h-4 text-warning-app shrink-0" /> No face found — position the photo by hand.
+                        <FiAlertTriangle className="w-4 h-4 text-warning-app shrink-0" /> No face found: position the photo by hand.
                       </>
                     ) : (
                       <>
@@ -1194,8 +1298,27 @@ export default function ImageEditor({
 
                   {showSlate && (
                     <div className="space-y-3 animate-fadeIn">
+                      {spec.examNote && (
+                        <div className="p-2 rounded bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-400 font-medium">
+                          {spec.examNote}
+                        </div>
+                      )}
                       <label className="flex flex-col gap-1">
-                        <span className="text-[12px] font-medium text-text-secondary">Candidate name</span>
+                        <span className="flex justify-between items-center text-[12px] font-medium text-text-secondary">
+                          Candidate name
+                          {slateName && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onSlateNameChange(slateName.toUpperCase());
+                                onSnapshot?.();
+                              }}
+                              className="text-[11px] text-accent-app hover:underline cursor-pointer"
+                            >
+                              ALL CAPS
+                            </button>
+                          )}
+                        </span>
                         <input
                           type="text"
                           value={slateName}
@@ -1207,20 +1330,37 @@ export default function ImageEditor({
                       </label>
                       <label className="flex flex-col gap-1">
                         <span className="flex justify-between items-center text-[12px] font-medium text-text-secondary">
-                          Photo date
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const d = new Date();
-                              const day = String(d.getDate()).padStart(2, '0');
-                              const month = String(d.getMonth() + 1).padStart(2, '0');
-                              onSlateDateChange(`DOP: ${day}/${month}/${d.getFullYear()}`);
-                              onSnapshot?.();
-                            }}
-                            className="text-[12px] text-accent-app hover:underline cursor-pointer"
-                          >
-                            Use today
-                          </button>
+                          Photo date (DOP)
+                          <span className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const d = new Date();
+                                const day = String(d.getDate()).padStart(2, '0');
+                                const month = String(d.getMonth() + 1).padStart(2, '0');
+                                onSlateDateChange(`DOP: ${day}/${month}/${d.getFullYear()}`);
+                                onSnapshot?.();
+                              }}
+                              className="text-[11px] text-accent-app hover:underline cursor-pointer"
+                            >
+                              Today
+                            </button>
+                            <span className="text-border-app">·</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const d = new Date();
+                                d.setDate(d.getDate() - 1);
+                                const day = String(d.getDate()).padStart(2, '0');
+                                const month = String(d.getMonth() + 1).padStart(2, '0');
+                                onSlateDateChange(`DOP: ${day}/${month}/${d.getFullYear()}`);
+                                onSnapshot?.();
+                              }}
+                              className="text-[11px] text-accent-app hover:underline cursor-pointer"
+                            >
+                              Yesterday
+                            </button>
+                          </span>
                         </span>
                         <input
                           type="text"

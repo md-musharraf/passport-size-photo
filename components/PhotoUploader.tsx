@@ -74,7 +74,7 @@ export default function PhotoUploader({ onImageUpload, onImagesUpload, onProject
     if (!isCameraActive) fileInputRef.current?.click();
   };
 
-  // ── Camera ────────────────────────────────────────────────
+  // Camera
   const startCamera = async (e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -138,12 +138,12 @@ export default function PhotoUploader({ onImageUpload, onImagesUpload, onProject
         setIsDragging(true);
       }}
       onDragLeave={() => setIsDragging(false)}
-      className={`relative w-full border-2 border-dashed rounded-xl p-6 sm:p-8 text-center transition-colors duration-150 flex flex-col items-center justify-center min-h-[260px] ${
+      className={`relative w-full border border-dashed rounded-xl p-6 sm:p-8 text-center transition-all duration-200 flex flex-col items-center justify-center min-h-[260px] ${
         isCameraActive ? 'cursor-default' : 'cursor-pointer'
       } ${
         isDragging
-          ? 'border-accent-app bg-accent-app/5'
-          : 'border-border-app bg-card-app hover:border-accent-app/60'
+          ? 'border-white/40 bg-white/5'
+          : 'card-chai hover:border-orange-50/30'
       }`}
     >
       <input
@@ -161,7 +161,7 @@ export default function PhotoUploader({ onImageUpload, onImagesUpload, onProject
 
       {isCameraActive ? (
         <div className="w-full flex flex-col items-center gap-4">
-          <div className="relative w-full max-w-md aspect-[4/3] rounded-lg overflow-hidden bg-black">
+          <div className="relative w-full max-w-md aspect-[4/3] rounded-lg overflow-hidden bg-black border border-white/10">
             <video ref={videoRef} className="w-full h-full object-cover -scale-x-100" playsInline muted />
             <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
               <svg viewBox="0 0 100 100" className="w-[70%] h-[70%] text-white/70">
@@ -169,42 +169,42 @@ export default function PhotoUploader({ onImageUpload, onImagesUpload, onProject
                 <line x1="20" y1="41" x2="80" y2="41" stroke="currentColor" strokeWidth="0.4" strokeDasharray="2 2" />
               </svg>
             </div>
-            <p className="absolute bottom-2 inset-x-0 text-center text-[12px] text-white/90 drop-shadow">
+            <p className="absolute bottom-2 inset-x-0 text-center text-[12px] text-white/90">
               Fit your face inside the oval and look at the camera
             </p>
           </div>
           <div className="flex gap-2 w-full max-w-xs">
-            <button type="button" onClick={stopCamera} className="studio-btn studio-btn-secondary flex-1">
+            <button type="button" onClick={stopCamera} className="btn-asym-mirror inline-flex h-9 items-center justify-center gap-2 border border-border bg-transparent px-4 text-sm font-medium transition-colors hover:bg-neutral-100 dark:hover:bg-black/90 flex-1">
               <FiX className="w-4 h-4" /> Cancel
             </button>
-            <button type="button" onClick={capturePhoto} className="studio-btn studio-btn-primary flex-1">
+            <button type="button" onClick={capturePhoto} className="btn-asym inline-flex h-9 items-center justify-center gap-2 bg-neutral-900 px-4 text-sm font-medium text-white transition-colors duration-200 hover:bg-black/90 dark:bg-white dark:text-black dark:hover:bg-neutral-200 flex-1">
               <FiCamera className="w-4 h-4" /> Take photo
             </button>
           </div>
         </div>
       ) : (
         <>
-          <span className="w-12 h-12 mb-3 rounded-full bg-accent-app/10 text-accent-app flex items-center justify-center">
+          <span className="w-12 h-12 mb-3 rounded-full bg-white/5 border border-white/10 text-neutral-300 flex items-center justify-center">
             {isReading ? (
-              <span className="w-5 h-5 rounded-full border-2 border-accent-app/30 border-t-accent-app animate-spin" />
+              <span className="w-5 h-5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
             ) : (
               <FiUploadCloud className="w-6 h-6" />
             )}
           </span>
-          <h3 className="text-[16px] font-semibold text-text-primary mb-1">
+          <h3 className="text-[17px] font-semibold text-foreground mb-1">
             {isReading ? 'Opening photo…' : 'Drop a photo here'}
           </h3>
-          <p className="text-[13px] text-text-secondary mb-5 max-w-sm">
+          <p className="text-[13px] text-neutral-400 mb-5 max-w-sm">
             JPG, PNG or WEBP up to 40 MB. Select several photos to make a group sheet, or open a saved project.
           </p>
-          <div className="flex flex-col sm:flex-row gap-2 w-full max-w-sm justify-center">
+          <div className="flex flex-col sm:flex-row gap-3 w-full max-w-sm justify-center">
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 openPicker();
               }}
-              className="studio-btn studio-btn-primary sm:flex-1"
+              className="btn-asym inline-flex h-9 items-center justify-center gap-2 bg-neutral-900 px-4 text-sm font-medium text-white transition-colors duration-200 hover:bg-black/90 dark:bg-white dark:text-black dark:hover:bg-neutral-200 sm:flex-1"
             >
               <FiFolder className="w-4 h-4" /> Choose photo
             </button>
@@ -212,7 +212,7 @@ export default function PhotoUploader({ onImageUpload, onImagesUpload, onProject
               id="uploader-camera-trigger"
               type="button"
               onClick={startCamera}
-              className="studio-btn studio-btn-secondary sm:flex-1"
+              className="btn-asym-mirror inline-flex h-9 items-center justify-center gap-2 border border-border bg-transparent px-4 text-sm font-medium transition-colors hover:bg-neutral-100 dark:hover:bg-black/90 sm:flex-1"
             >
               <FiCamera className="w-4 h-4" /> Use camera
             </button>

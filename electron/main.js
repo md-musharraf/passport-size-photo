@@ -295,9 +295,17 @@ app.whenReady().then(() => {
       // Target file path in the 'out' directory
       let absolutePath = path.normalize(path.join(__dirname, '..', 'out', filePath));
       
-      // Check if file exists. If it doesn't and doesn't have an extension (Next.js route), serve index.html
+      // If not in 'out', check 'public' directory (e.g. models or assets)
       if (!fs.existsSync(absolutePath)) {
-        if (!filePath.includes('.')) {
+        const publicPath = path.normalize(path.join(__dirname, '..', 'public', filePath));
+        if (fs.existsSync(publicPath)) {
+          absolutePath = publicPath;
+        }
+      }
+      
+      // Check if file exists. If it doesn't and it's a route (not a model/asset file), serve index.html
+      if (!fs.existsSync(absolutePath)) {
+        if (!filePath.includes('.') && !filePath.startsWith('/models/')) {
           const fallbackPath = path.normalize(path.join(__dirname, '..', 'out', 'index.html'));
           if (fs.existsSync(fallbackPath)) {
             absolutePath = fallbackPath;
@@ -321,7 +329,8 @@ app.whenReady().then(() => {
         headers: { 
           'content-type': mimeType,
           'Cross-Origin-Opener-Policy': 'same-origin',
-          'Cross-Origin-Embedder-Policy': 'require-corp'
+          'Cross-Origin-Embedder-Policy': 'require-corp',
+          'Cross-Origin-Resource-Policy': 'cross-origin'
         }
       });
     } catch (error) {

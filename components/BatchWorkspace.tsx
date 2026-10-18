@@ -338,7 +338,7 @@ export default function BatchWorkspace({
     }
   };
 
-  // Items can arrive already loaded but unprocessed — e.g. several photos
+  // Items can arrive already loaded but unprocessed, e.g. several photos
   // chosen together on the start screen, or a restored session. Start the AI
   // pipeline for each of those exactly once (it previously never ran for
   // them, leaving the queue stuck on "Calibrating face").
@@ -587,15 +587,15 @@ export default function BatchWorkspace({
       {/* COLUMN 1: Settings Panel (Left side, 340px) */}
       <aside className="w-full md:w-[320px] bg-panel-app border-r border-border-app p-4 space-y-4 overflow-y-auto select-none shrink-0">
         <div className="space-y-1">
-          <h3 className="text-sm font-bold text-accent-app uppercase tracking-widest flex items-center gap-1.5">
-            <FiSliders className="w-4 h-4" /> Layout Settings
+          <h3 className="text-sm font-semibold text-text-primary flex items-center gap-1.5">
+            <FiSliders className="w-4 h-4 text-neutral-400" /> Layout settings
           </h3>
           <p className="text-[10px] text-text-secondary">Configure sizing and sheet margins.</p>
         </div>
 
         {/* Presets */}
         <div className="flex flex-col gap-1">
-          <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest pl-0.5">Photo Size Preset</label>
+          <label className="text-xs font-medium text-neutral-400 pl-0.5">Photo size preset</label>
           <select
             value={preset}
             onChange={(e) => onPresetChange(e.target.value)}
@@ -609,7 +609,7 @@ export default function BatchWorkspace({
 
         {/* Background Color */}
         <div className="flex flex-col gap-1.5">
-          <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest pl-0.5">Background Color</label>
+          <label className="text-xs font-medium text-neutral-400 pl-0.5">Background color</label>
           <div className="grid grid-cols-4 gap-2">
             {[
               { label: 'White', color: '#FFFFFF' },
@@ -620,9 +620,9 @@ export default function BatchWorkspace({
               <button
                 key={c.label}
                 onClick={() => onBgColorChange(c.color)}
-                className={`py-1.5 rounded-lg border text-[10px] font-bold transition-all cursor-pointer ${
+                className={`py-1.5 rounded-lg border text-[10px] font-medium transition-all cursor-pointer ${
                   bgColor === c.color 
-                    ? 'border-accent-app bg-accent-app/10 text-accent-app font-black shadow-inner shadow-accent-app/5' 
+                    ? 'border-white text-foreground ring-1 ring-white/30 bg-card-app' 
                     : 'border-border-app bg-card-app text-text-secondary hover:text-text-primary'
                 }`}
               >
@@ -636,7 +636,7 @@ export default function BatchWorkspace({
         {/* Photo Border */}
         <div className="border-t border-border-app/40 pt-3 space-y-3">
           <div className="flex items-center justify-between">
-            <label className="text-[11px] font-black text-neutral-400 uppercase tracking-wider">Photo Cut Border</label>
+            <label className="text-xs font-medium text-neutral-400">Photo cut border</label>
             <input
               type="checkbox"
               checked={showBorder}
@@ -722,17 +722,17 @@ export default function BatchWorkspace({
       <section className="flex-1 bg-bg-app border-r border-border-app p-4 flex flex-col min-h-0 select-none">
         <div className="flex justify-between items-center mb-3">
           <div>
-            <h2 className="text-sm font-bold text-text-primary flex items-center gap-1.5 uppercase tracking-widest">
-              <FiUsers className="w-4 h-4 text-accent-app animate-pulse" /> Batch Queue ({batchItems.length} persons)
+            <h2 className="text-sm font-semibold text-text-primary flex items-center gap-1.5">
+              <FiUsers className="w-4 h-4 text-neutral-400" /> Batch queue ({batchItems.length} persons)
             </h2>
             <p className="text-[10px] text-text-secondary">Drag rows to reorder. Processed in parallel automatically.</p>
           </div>
 
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="studio-btn studio-btn-primary py-1 px-3 text-xs"
+            className="btn-asym py-1 px-3 text-xs bg-white text-black hover:bg-neutral-200 cursor-pointer transition-colors"
           >
-            <FiPlus className="w-3.5 h-3.5 mr-1" /> Add Photos
+            <FiPlus className="w-3.5 h-3.5 mr-1 inline" /> Add photos
           </button>
           <input
             ref={fileInputRef}
@@ -863,8 +863,8 @@ export default function BatchWorkspace({
         <div className="w-full space-y-3">
           <div className="flex justify-between items-center">
             <div>
-              <h3 className="text-sm font-bold text-text-primary uppercase tracking-widest flex items-center gap-1.5">
-                <FaRuler className="w-4 h-4 text-accent-app" /> A4 Print Preview
+              <h3 className="text-sm font-semibold text-text-primary flex items-center gap-1.5">
+                <FaRuler className="w-4 h-4 text-neutral-400" /> A4 print preview
               </h3>
               <p className="text-[10px] text-text-secondary">Live sheet simulation, 6 copies per row.</p>
             </div>
@@ -893,7 +893,7 @@ export default function BatchWorkspace({
           {/* Paginated Sheet Render */}
           <div className="flex-1 flex items-center justify-center w-full py-4 min-h-[300px]">
             <div 
-              className="relative w-full max-w-[240px] xl:max-w-[280px] bg-white border border-slate-200 rounded shadow-2xl flex flex-col justify-between overflow-hidden select-none transition-all duration-300"
+              className="relative w-full max-w-[240px] xl:max-w-[280px] bg-white border border-slate-200 rounded flex flex-col justify-between overflow-hidden select-none transition-all duration-300"
               style={{
                 aspectRatio: '210 / 297'
               }}

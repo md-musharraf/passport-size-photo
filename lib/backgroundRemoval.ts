@@ -43,11 +43,12 @@ function dataURLtoBlob(dataurl: string): Blob {
 // 1024 matches the isnet model's own working resolution, so the cutout mask is
 // bit-for-bit identical to feeding a larger image while cutting preprocessing and
 // PNG-encoding time — and it is still ~2x the pixels of the final print size.
-const MAX_INPUT_DIMENSION = 1024;
+const MAX_INPUT_DIMENSION_FAST = 1024;
+const MAX_INPUT_DIMENSION_BEST = 1536;
 
-// Downscale a large image before background removal. Returns a Blob ready for the model.
-// If the image is already small enough it is returned unchanged (no re-encode).
-async function prepareInputBlob(imageData: string): Promise<Blob> {
+// Downscale a large image before AI inference so the model runs in ~1-2 seconds.
+// The cutout mask will later be composited back onto the full-resolution original image!
+async function prepareInputBlob(imageData: string, quality: BgQuality = 'auto'): Promise<Blob> {
   // Load the source into an <img> so we can measure and (optionally) resize it.
   const img = document.createElement('img');
   img.decoding = 'async';
@@ -58,15 +59,16 @@ async function prepareInputBlob(imageData: string): Promise<Blob> {
   });
 
   const longEdge = Math.max(img.naturalWidth, img.naturalHeight);
+  const targetMaxDim = quality === 'best' ? MAX_INPUT_DIMENSION_BEST : MAX_INPUT_DIMENSION_FAST;
 
   // Already small enough — hand the original bytes straight through.
-  if (longEdge <= MAX_INPUT_DIMENSION || longEdge === 0) {
+  if (longEdge <= targetMaxDim || longEdge === 0) {
     if (imageData.startsWith('data:')) return dataURLtoBlob(imageData);
     const response = await fetch(imageData);
     return response.blob();
   }
 
-  const scale = MAX_INPUT_DIMENSION / longEdge;
+  const scale = targetMaxDim / longEdge;
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(img.naturalWidth * scale);
   canvas.height = Math.round(img.naturalHeight * scale);
@@ -86,6 +88,97 @@ async function prepareInputBlob(imageData: string): Promise<Blob> {
       'image/png',
     );
   });
+}
+
+/**
+ * Composite the AI model's alpha mask back onto the FULL-RESOLUTION original photo.
+ * This guarantees zero loss of facial sharpness, micro-texture, hair details, or print resolution.
+ */
+async function compositeFullResolutionCutout(
+  originalImageData: string,
+  modelOutputBlob: Blob,
+): Promise<string> {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(modelOutputBlob);
+    });
+  }
+
+  const origImg = new Image();
+  origImg.decoding = 'async';
+  const origLoaded = new Promise<void>((resolve, reject) => {
+    origImg.onload = () => resolve();
+    origImg.onerror = () => reject(new Error('Failed to load original image for compositing'));
+    origImg.src = originalImageData;
+  });
+
+  const cutoutImg = new Image();
+  cutoutImg.decoding = 'async';
+  const cutoutUrl = URL.createObjectURL(modelOutputBlob);
+  const cutoutLoaded = new Promise<void>((resolve, reject) => {
+    cutoutImg.onload = () => resolve();
+    cutoutImg.onerror = () => reject(new Error('Failed to load model cutout for compositing'));
+    cutoutImg.src = cutoutUrl;
+  });
+
+  try {
+    await Promise.all([origLoaded, cutoutLoaded]);
+    const origW = origImg.naturalWidth;
+    const origH = origImg.naturalHeight;
+    const modelW = cutoutImg.naturalWidth;
+    const modelH = cutoutImg.naturalHeight;
+
+    // If original photo is already small (or same size as model), return model blob directly
+    if (origW <= modelW && origH <= modelH) {
+      return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(modelOutputBlob);
+      });
+    }
+
+    // Create full-resolution canvas matching the original photo's pristine dimensions
+    const canvas = document.createElement('canvas');
+    canvas.width = origW;
+    canvas.height = origH;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      return new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(modelOutputBlob);
+      });
+    }
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+
+    // Step 1: Draw full-resolution original image with all its crisp details
+    ctx.drawImage(origImg, 0, 0, origW, origH);
+
+    // Step 2: Use 'destination-in' to apply the smooth AI-generated alpha mask
+    // Keeps 100% of the original photo's native RGB pixels inside the mask,
+    // while making the background perfectly transparent.
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(cutoutImg, 0, 0, origW, origH);
+
+    return canvas.toDataURL('image/png');
+  } catch (err) {
+    console.warn('Full-resolution compositing fallback to model output:', err);
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(modelOutputBlob);
+    });
+  } finally {
+    URL.revokeObjectURL(cutoutUrl);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -138,7 +231,9 @@ function buildConfig(model: ImglyModel, device: Device, useLocal: boolean, progr
   return {
     model,
     device,
-    ...(useLocal ? { publicPath: localPublicPath() } : {}),
+    publicPath: useLocal
+      ? localPublicPath()
+      : 'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/',
     output: { format: 'image/png' as const, quality: 1.0 },
     ...(progress ? { progress } : {}),
   };
@@ -180,6 +275,15 @@ export function warmUpBackgroundModel(quality: BgQuality = 'auto'): Promise<void
   return warmupPromise;
 }
 
+const MAX_CUTOUT_CACHE = 4;
+const cutoutCache = new Map<string, string>();
+
+function getCutoutCacheKey(imageData: string, quality: BgQuality): string {
+  const len = imageData.length;
+  if (len < 300) return `${imageData}_${quality}`;
+  return `${len}_${quality}_${imageData.slice(0, 80)}_${imageData.slice(Math.floor(len / 2), Math.floor(len / 2) + 80)}_${imageData.slice(-80)}`;
+}
+
 export function removeBackground(
   imageData: string,
   quality: BgQuality = 'auto',
@@ -198,8 +302,15 @@ async function removeBackgroundImpl(
   onProgress?: (progress: number) => void,
   onStatusChange?: (statusText: string) => void,
 ): Promise<string> {
+  const cacheKey = getCutoutCacheKey(imageData, quality);
+  if (cutoutCache.has(cacheKey)) {
+    onStatusChange?.('Background removed.');
+    onProgress?.(100);
+    return cutoutCache.get(cacheKey)!;
+  }
+
   const { removeBackground: imglyRemoveBackground } = await import('@imgly/background-removal');
-  const blob = await prepareInputBlob(imageData);
+  const blob = await prepareInputBlob(imageData, quality);
 
   // Map imgly's per-stage callbacks onto one steadily increasing percentage:
   // downloads/initialisation fill 0-60%, inference + encode fill 60-100%.
@@ -255,10 +366,13 @@ async function removeBackgroundImpl(
     }
   }
 
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.onerror = (err) => reject(err);
-    reader.readAsDataURL(outputBlob);
-  });
+  onStatusChange?.('Compositing full-resolution details…');
+  const finalDataUrl = await compositeFullResolutionCutout(imageData, outputBlob);
+
+  if (cutoutCache.size >= MAX_CUTOUT_CACHE) {
+    const first = cutoutCache.keys().next().value;
+    if (first) cutoutCache.delete(first);
+  }
+  cutoutCache.set(cacheKey, finalDataUrl);
+  return finalDataUrl;
 }

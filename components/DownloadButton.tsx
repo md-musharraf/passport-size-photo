@@ -11,6 +11,7 @@ import { FaRuler } from 'react-icons/fa';
 import MultiPersonPanel from './MultiPersonPanel';
 import { loadJsPDF, preloadJsPDF } from '@/lib/pdf';
 import { toast } from '@/lib/toast';
+import { ArrowUpRight } from 'lucide-react';
 
 interface DownloadButtonProps {
   imageData: string | null;
@@ -219,7 +220,11 @@ export default function DownloadButton({
   // Cyber Cafe target KB size compression states
   const [compressToKB, setCompressToKB] = useState<boolean>(false);
   const [targetKB, setTargetKB] = useState<number>(50); // Default 50KB (UPSC/Passport Seva limit)
-  const [compressPreset, setCompressPreset] = useState<'none' | '20kb' | '50kb' | 'custom'>('none');
+  const [compressPreset, setCompressPreset] = useState<'none' | '20kb' | '50kb' | '100kb' | '200kb' | 'custom'>('none');
+
+  // Studio branding / Header for Indian Photo Studios & Cyber Cafes
+  const [showStudioBranding, setShowStudioBranding] = useState<boolean>(false);
+  const [studioBrandingText, setStudioBrandingText] = useState<string>('');
 
 
 
@@ -283,7 +288,7 @@ export default function DownloadButton({
       pw = Math.max(5, Math.min(pw_limit, ph_limit * ratio));
       ph = pw / ratio;
     } else {
-      // A4 Portrait — Indian CSC owner rules:
+      // A4 Portrait: Indian CSC owner rules:
       // Max 6 cols per row. If exactly 5 copies → 5 cols. If <= 4, keep size of 6 cols but place from start.
       const activeCopies = autoFitA4 ? 36 : photoCount;
       if (activeCopies === 5) {
@@ -367,50 +372,83 @@ export default function DownloadButton({
     onSkipCountChange(clamped);
   };
 
-  // Helper to compress image down to a specific target size (KB) by binary-searching Jpeg quality and scaling dimensions if needed
+  // Helper to compress image down to a specific target size (KB) while strictly preserving high visual sharpness
   const compressImageToKB = async (canvas: HTMLCanvasElement, targetSizeKB: number): Promise<string> => {
-    let minQuality = 0.05;
-    let maxQuality = 0.98;
-    let quality = 0.85;
-    let blob: Blob | null = null;
+    // 1. Calculate optimal initial dimensions so JPEG quality never drops below 0.72.
+    // High-quality JPEG (~0.85) uses approx 0.22 bytes per pixel.
+    const targetBytes = targetSizeKB * 1024;
+    const estOptimalPixels = targetBytes / 0.22;
+    const currentPixels = canvas.width * canvas.height;
 
-    // 1. Binary search for Jpeg Quality
+    let initialScale = 1.0;
+    if (currentPixels > estOptimalPixels * 1.3) {
+      initialScale = Math.min(1.0, Math.sqrt(estOptimalPixels / currentPixels) * 1.15);
+    }
+
+    let workCanvas = canvas;
+    if (initialScale < 0.96) {
+      workCanvas = document.createElement('canvas');
+      workCanvas.width = Math.max(160, Math.round(canvas.width * initialScale));
+      workCanvas.height = Math.max(200, Math.round(canvas.height * initialScale));
+      const wCtx = workCanvas.getContext('2d');
+      if (wCtx) {
+        wCtx.imageSmoothingEnabled = true;
+        wCtx.imageSmoothingQuality = 'high';
+        wCtx.drawImage(canvas, 0, 0, workCanvas.width, workCanvas.height);
+      } else {
+        workCanvas = canvas;
+      }
+    }
+
+    // 2. Binary search for high-fidelity JPEG Quality in range [0.72, 0.96]
+    let minQ = 0.70;
+    let maxQ = 0.96;
+    let q = 0.88;
+    let bestBlob: Blob | null = null;
+
     for (let step = 0; step < 7; step++) {
-      blob = await new Promise<Blob | null>((resolve) => {
-        canvas.toBlob((b) => resolve(b), 'image/jpeg', quality);
+      const blob = await new Promise<Blob | null>((resolve) => {
+        workCanvas.toBlob((b) => resolve(b), 'image/jpeg', q);
       });
       if (!blob) break;
       const sizeKB = blob.size / 1024;
-      if (sizeKB > targetSizeKB) {
-        maxQuality = quality;
-        quality = (quality + minQuality) / 2;
+      if (sizeKB <= targetSizeKB) {
+        bestBlob = blob;
+        minQ = q;
+        q = (q + maxQ) / 2;
       } else {
-        minQuality = quality;
-        quality = (quality + maxQuality) / 2;
+        maxQ = q;
+        q = (q + minQ) / 2;
       }
     }
 
-    // 2. If it's still too large (e.g. extremely complex image), scale down the dimensions
-    let scale = 0.95;
-    while (blob && (blob.size / 1024) > targetSizeKB && scale > 0.3) {
+    // 3. If still oversized, gradually scale down dimensions while preserving high quality (0.82)
+    let currentScale = 0.92;
+    while ((!bestBlob || (bestBlob.size / 1024) > targetSizeKB) && currentScale >= 0.35) {
       const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = Math.round(canvas.width * scale);
-      tempCanvas.height = Math.round(canvas.height * scale);
+      tempCanvas.width = Math.max(120, Math.round(workCanvas.width * currentScale));
+      tempCanvas.height = Math.max(150, Math.round(workCanvas.height * currentScale));
       const tempCtx = tempCanvas.getContext('2d');
       if (tempCtx) {
-        tempCtx.drawImage(canvas, 0, 0, tempCanvas.width, tempCanvas.height);
-        blob = await new Promise<Blob | null>((resolve) => {
-          tempCanvas.toBlob((b) => resolve(b), 'image/jpeg', 0.5); // use moderate quality
+        tempCtx.imageSmoothingEnabled = true;
+        tempCtx.imageSmoothingQuality = 'high';
+        tempCtx.drawImage(workCanvas, 0, 0, tempCanvas.width, tempCanvas.height);
+        const blob = await new Promise<Blob | null>((resolve) => {
+          tempCanvas.toBlob((b) => resolve(b), 'image/jpeg', 0.82); // Keep high 82% quality!
         });
+        if (blob && (blob.size / 1024) <= targetSizeKB) {
+          bestBlob = blob;
+          break;
+        }
       }
-      scale -= 0.1;
+      currentScale -= 0.08;
     }
 
-    if (blob) {
+    if (bestBlob) {
       return new Promise<string>((resolve) => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob!);
+        reader.readAsDataURL(bestBlob!);
       });
     }
 
@@ -951,10 +989,14 @@ export default function DownloadButton({
         }
 
         let footerHTML = '';
-        if (showFooterNotes) {
+        const brandingHTML = showStudioBranding && studioBrandingText.trim()
+          ? `<p style="margin: 1mm 0 0 0; color: #374151; font-size: 8pt; font-weight: bold; letter-spacing: 0.3px;">${studioBrandingText}</p>`
+          : '';
+        if (showFooterNotes || brandingHTML) {
           footerHTML = `
             <div class="footer" style="position: absolute; left: 0; width: ${pageW}mm; top: ${pageH - margin - 8}mm; text-align: center;">
-              <p style="margin: 0; color: #6b7280; font-size: 8pt; font-weight: bold;">Print at 100% scale. Do not fit to page.</p>
+              ${showFooterNotes ? `<p style="margin: 0; color: #6b7280; font-size: 8pt; font-weight: bold;">Print at 100% scale. Do not fit to page.</p>` : ''}
+              ${brandingHTML}
             </div>
           `;
         }
@@ -1079,10 +1121,10 @@ export default function DownloadButton({
       {/* Print settings controls */}
       <div className="bg-card-app border border-border-app rounded-xl p-4 space-y-4">
         
-        {/* ⚡ 1-Click Cyber Cafe Quick Print Presets */}
-        <div className="flex flex-col gap-1.5 bg-accent-app/10 border border-accent-app/30 p-3 rounded-xl">
-          <span className="text-[11px] font-black text-accent-app uppercase tracking-wider flex items-center gap-1 select-none">
-            ⚡ 1-Click Cyber Cafe Print Presets
+        {/* Quick Print Presets */}
+        <div className="flex flex-col gap-1.5 card-chai p-3 rounded-xl">
+          <span className="text-xs font-semibold text-text-primary flex items-center gap-1 select-none">
+            Quick print presets
           </span>
           <div className="grid grid-cols-2 gap-2">
             <button
@@ -1095,7 +1137,7 @@ export default function DownloadButton({
                 onIsCustomCountChange(false);
                 onPhotoCountChange(8);
               }}
-              className="px-2.5 py-1.5 rounded-lg bg-card-app hover:bg-accent-app hover:text-white border border-border-app text-[11px] font-bold text-text-primary text-left transition-all cursor-pointer flex items-center justify-between shadow-sm"
+              className="px-2.5 py-1.5 rounded-lg bg-card-app hover:bg-neutral-800 border border-border-app text-[11px] font-medium text-text-primary text-left transition-all cursor-pointer flex items-center justify-between"
               title="Set 4x6 Landscape Sheet with 8 Passport Photos"
             >
               <span>8 Photos (4×6)</span>
@@ -1112,7 +1154,7 @@ export default function DownloadButton({
                 onIsCustomCountChange(false);
                 onPhotoCountChange(6);
               }}
-              className="px-2.5 py-1.5 rounded-lg bg-card-app hover:bg-accent-app hover:text-white border border-border-app text-[11px] font-bold text-text-primary text-left transition-all cursor-pointer flex items-center justify-between shadow-sm"
+              className="px-2.5 py-1.5 rounded-lg bg-card-app hover:bg-neutral-800 border border-border-app text-[11px] font-medium text-text-primary text-left transition-all cursor-pointer flex items-center justify-between"
               title="Set 4x6 Landscape Sheet with 6 Passport Photos"
             >
               <span>6 Photos (4×6)</span>
@@ -1129,7 +1171,7 @@ export default function DownloadButton({
                 onIsCustomCountChange(false);
                 onPhotoCountChange(30);
               }}
-              className="px-2.5 py-1.5 rounded-lg bg-card-app hover:bg-accent-app hover:text-white border border-border-app text-[11px] font-bold text-text-primary text-left transition-all cursor-pointer flex items-center justify-between shadow-sm"
+              className="px-2.5 py-1.5 rounded-lg bg-card-app hover:bg-neutral-800 border border-border-app text-[11px] font-medium text-text-primary text-left transition-all cursor-pointer flex items-center justify-between"
               title="Set A4 Portrait Sheet with 30 Passport Photos"
             >
               <span>30 Photos (A4)</span>
@@ -1144,7 +1186,7 @@ export default function DownloadButton({
                 onUseCustomGridChange(false);
                 onAutoFitA4Change(true);
               }}
-              className="px-2.5 py-1.5 rounded-lg bg-card-app hover:bg-accent-app hover:text-white border border-border-app text-[11px] font-bold text-text-primary text-left transition-all cursor-pointer flex items-center justify-between shadow-sm"
+              className="px-2.5 py-1.5 rounded-lg bg-card-app hover:bg-neutral-800 border border-border-app text-[11px] font-medium text-text-primary text-left transition-all cursor-pointer flex items-center justify-between"
               title="Set Full A4 Sheet Auto-Fit Grid"
             >
               <span>Full Sheet (A4)</span>
@@ -1195,7 +1237,7 @@ export default function DownloadButton({
           </div>
         </div>
 
-        {/* Orientation Selector — Only shown for 4R paper */}
+        {/* Orientation Selector: Only shown for 4R paper */}
         {paperSize === '4r' && (
           <div className="flex flex-col gap-1.5 animate-fadeIn">
             <label className="app-label flex items-center gap-1.5">
@@ -1208,10 +1250,10 @@ export default function DownloadButton({
                 className="w-full min-h-[48px] bg-panel-app border border-border-app text-text-primary text-[15px] font-semibold rounded-xl pl-4 pr-10 py-2 outline-none focus:border-accent-app cursor-pointer appearance-none shadow-inner"
               >
                 <option value="portrait">
-                  Portrait — {photoCount === 8 ? '2×4 Grid (8 Photos)' : '2×3 Grid (6 Photos)'}
+                  Portrait: {photoCount === 8 ? '2×4 Grid (8 Photos)' : '2×3 Grid (6 Photos)'}
                 </option>
                 <option value="landscape">
-                  Landscape — {photoCount === 8 ? '4×2 Grid (8 Photos)' : '3×2 Grid (6 Photos)'}
+                  Landscape: {photoCount === 8 ? '4×2 Grid (8 Photos)' : '3×2 Grid (6 Photos)'}
                 </option>
               </select>
               <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary">
@@ -1410,8 +1452,8 @@ export default function DownloadButton({
               {/* Columns Slider */}
               <div className="space-y-1">
                 <div className="flex justify-between items-center pl-0.5">
-                  <span className="text-[11px] font-black text-neutral-400 uppercase tracking-widest">Columns (Photos per Row)</span>
-                  <span className="text-xs font-black text-text-primary">{customGridCols}</span>
+                  <span className="text-xs font-medium text-neutral-400">Columns (photos per row)</span>
+                  <span className="text-xs font-semibold text-text-primary">{customGridCols}</span>
                 </div>
                 <input
                   type="range"
@@ -1427,8 +1469,8 @@ export default function DownloadButton({
               {/* Rows Slider */}
               <div className="space-y-1">
                 <div className="flex justify-between items-center pl-0.5">
-                  <span className="text-[11px] font-black text-neutral-400 uppercase tracking-widest">Rows (Photos per Column)</span>
-                  <span className="text-xs font-black text-text-primary">{customGridRows}</span>
+                  <span className="text-xs font-medium text-neutral-400">Rows (photos per column)</span>
+                  <span className="text-xs font-semibold text-text-primary">{customGridRows}</span>
                 </div>
                 <input
                   type="range"
@@ -1530,8 +1572,8 @@ export default function DownloadButton({
             <div className="space-y-3 pt-2.5 border-t border-border-app/40 animate-fadeIn">
               {/* Border Color */}
               <div className="space-y-1.5">
-                <span className="text-[11px] font-black text-neutral-400 uppercase tracking-widest pl-0.5">
-                  Border Color
+                <span className="text-xs font-medium text-neutral-400 pl-0.5">
+                  Border color
                 </span>
                 <div className="flex items-center gap-2">
                   {[
@@ -1588,8 +1630,8 @@ export default function DownloadButton({
               {/* Border Thickness */}
               <div className="space-y-1">
                 <div className="flex justify-between items-center pl-0.5">
-                  <span className="text-[11px] font-black text-neutral-400 uppercase tracking-widest">Border Size</span>
-                  <span className="text-xs font-black text-text-primary">{borderSize} mm</span>
+                  <span className="text-xs font-medium text-neutral-400">Border size</span>
+                  <span className="text-xs font-semibold text-text-primary">{borderSize} mm</span>
                 </div>
                 <input
                   type="range"
@@ -1693,6 +1735,37 @@ export default function DownloadButton({
 
         </div>
 
+        {/* Studio Branding for Indian Photo Studios & Cyber Cafes */}
+        <div className="bg-panel-app/60 border border-border-app rounded-xl p-3.5 space-y-3">
+          <div className="flex items-center justify-between">
+            <label htmlFor="studio-branding-cb" className="app-label flex items-center gap-1.5 font-bold text-accent-app cursor-pointer">
+              <FiPrinter className="w-4 h-4" /> Studio Name &amp; Contact
+            </label>
+            <input
+              type="checkbox"
+              id="studio-branding-cb"
+              checked={showStudioBranding}
+              onChange={(e) => setShowStudioBranding(e.target.checked)}
+              className="w-5 h-5 accent-accent-app rounded border-border-app cursor-pointer"
+            />
+          </div>
+
+          {showStudioBranding && (
+            <div className="space-y-2 pt-2 border-t border-border-app/40 animate-fadeIn">
+              <label className="text-xs font-medium text-neutral-400 pl-0.5">
+                Printed on sheet margin (outside photos)
+              </label>
+              <input
+                type="text"
+                value={studioBrandingText}
+                onChange={(e) => setStudioBrandingText(e.target.value)}
+                placeholder="e.g. Kumar Digital Studio, Patna • Mob: 9876543210"
+                className="w-full h-9 px-3 bg-card-app border border-border-app rounded-lg text-text-primary text-[13px] outline-none focus:border-accent-app"
+              />
+            </div>
+          )}
+        </div>
+
         {/* Target KB Size Compressor */}
         <div className="bg-panel-app/50 border border-border-app rounded-xl p-3 space-y-3 pt-3 mt-1">
           <div className="flex items-center justify-between">
@@ -1719,14 +1792,16 @@ export default function DownloadButton({
           {compressToKB && (
             <div className="space-y-3 pt-2.5 border-t border-border-app/40 animate-fadeIn">
               <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest pl-0.5">
-                  Govt Portal Limit
+                <label className="text-xs font-medium text-neutral-400 pl-0.5">
+                  Govt portal limit
                 </label>
-                <div className="grid grid-cols-3 gap-1.5">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
                   {[
-                    { id: '20kb', label: 'Max 20KB', value: 20 },
-                    { id: '50kb', label: 'Max 50KB', value: 50 },
-                    { id: 'custom', label: 'Custom...', value: targetKB },
+                    { id: '20kb', label: 'Max 20KB (Govt)', value: 20 },
+                    { id: '50kb', label: 'Max 50KB (UPSC/SSC)', value: 50 },
+                    { id: '100kb', label: 'Max 100KB (PSC)', value: 100 },
+                    { id: '200kb', label: 'Max 200KB (NEET)', value: 200 },
+                    { id: 'custom', label: 'Custom KB', value: targetKB },
                   ].map((p) => {
                     const isActive = compressPreset === p.id;
                     return (
@@ -1755,13 +1830,13 @@ export default function DownloadButton({
               {compressPreset === 'custom' && (
                 <div className="space-y-1">
                   <div className="flex justify-between items-center pl-0.5">
-                    <span className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Max Size Limit</span>
-                    <span className="text-xs font-black text-text-primary">{targetKB} KB</span>
+                    <span className="text-xs font-medium text-neutral-400">Max size limit</span>
+                    <span className="text-xs font-semibold text-text-primary">{targetKB} KB</span>
                   </div>
                   <input
                     type="range"
                     min={10}
-                    max={100}
+                    max={300}
                     step={5}
                     value={targetKB}
                     onChange={(e) => setTargetKB(Number(e.target.value))}
@@ -1771,7 +1846,7 @@ export default function DownloadButton({
               )}
               
               <p className="text-[10px] text-neutral-500 font-semibold leading-relaxed pl-0.5">
-                Compresses Jpeg quality & dims dynamically to guarantee it stays under {targetKB}KB.
+                Compresses Jpeg quality &amp; dims dynamically to guarantee it stays under {targetKB}KB.
               </p>
             </div>
           )}
@@ -1812,25 +1887,25 @@ export default function DownloadButton({
           <button
             onClick={downloadJPG}
             disabled={generating || !imageData}
-            className="studio-btn studio-btn-primary flex items-center justify-center gap-2 w-full text-[14px] font-black uppercase tracking-wider py-3 rounded-xl shadow-lg shadow-accent-app/10 cursor-pointer transition-all active:scale-98"
+            className="btn-asym flex items-center justify-center gap-2 w-full text-xs font-semibold py-3 bg-white text-black hover:bg-neutral-200 cursor-pointer transition-colors"
           >
-            <FiImage className="w-5 h-5" /> Download Single Photo (JPEG)
+            <FiImage className="w-4 h-4" /> Download single photo (JPEG) <ArrowUpRight className="w-4 h-4" />
           </button>
           
           <div className="grid grid-cols-2 gap-3">
             <button
               onClick={downloadPDF}
               disabled={generating || !imageData}
-              className="studio-btn studio-btn-secondary flex items-center justify-center gap-2 w-full text-xs py-2.5 rounded-xl cursor-pointer"
+              className="btn-asym-mirror flex items-center justify-center gap-2 w-full text-xs py-2.5 border border-border hover:bg-neutral-800 cursor-pointer transition-colors"
             >
-              <FiDownload className="w-4 h-4" /> Export PDF Sheet
+              <FiDownload className="w-4 h-4" /> Export PDF sheet
             </button>
             <button
               onClick={printSheet}
               disabled={generating || !imageData}
-              className="studio-btn studio-btn-secondary flex items-center justify-center gap-2 w-full text-xs py-2.5 rounded-xl cursor-pointer"
+              className="btn-asym-mirror flex items-center justify-center gap-2 w-full text-xs py-2.5 border border-border hover:bg-neutral-800 cursor-pointer transition-colors"
             >
-              <FiPrinter className="w-4 h-4" /> Print Sheet
+              <FiPrinter className="w-4 h-4" /> Print sheet
             </button>
           </div>
         </div>
@@ -1840,13 +1915,13 @@ export default function DownloadButton({
       {/* Trigger CTA triggers on Success Page */}
       {showExportSuccess && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm select-none">
-          <div className="bg-panel-app border border-border-app rounded-2xl p-6 shadow-2xl flex flex-col items-center gap-4 text-center max-w-sm w-full mx-4 animate-in zoom-in-95 duration-250">
+          <div className="card-chai rounded-2xl p-6 flex flex-col items-center gap-4 text-center max-w-sm w-full mx-4 animate-in zoom-in-95 duration-250">
             <div className="w-12 h-12 bg-emerald-500/10 border border-emerald-500/30 text-success-app rounded-full flex items-center justify-center">
               <FiCheckCircle className="w-7 h-7" />
             </div>
             <div>
-              <h4 className="text-[18px] font-bold text-text-primary uppercase tracking-wider">Sheet compiled</h4>
-              <p className="text-[14px] text-text-secondary mt-1 font-semibold">DPI scales adjusted. Check downloads folder.</p>
+              <h4 className="text-[17px] font-semibold text-text-primary">Sheet compiled</h4>
+              <p className="text-[13px] text-text-secondary mt-1">DPI scales adjusted. Check your downloads folder.</p>
             </div>
           </div>
         </div>

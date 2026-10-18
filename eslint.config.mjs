@@ -24,6 +24,7 @@ const eslintConfig = defineConfig([
     "dist-electron/**",
     // Downloaded AI runtimes / model assets (vendor code, gitignored).
     "public/models/**",
+    "android/**",
   ]),
 ]);
 

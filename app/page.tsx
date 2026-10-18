@@ -29,8 +29,11 @@ import {
   FiUser,
   FiCheckCircle,
 } from "react-icons/fi";
-import { FaUndo, FaRedo, FaPaintBrush, FaMagic } from "react-icons/fa";
+import { FaUndo, FaRedo, FaPaintBrush, FaMagic, FaSignature } from "react-icons/fa";
 import { BsStars, BsLightbulb } from "react-icons/bs";
+import { ArrowUpRight } from "lucide-react";
+import { ChaiBackdrop } from "@/components/ChaiBackdrop";
+import { AnimatedBadge } from "@/components/AnimatedBadge";
 
 export type ScreenState = "welcome" | "presets" | "adjust" | "print-sheet" | "success";
 
@@ -55,6 +58,7 @@ const DownloadButton = dynamic(loadDownloadButton, { ssr: false });
 const BGRemover = dynamic(loadBGRemover, { ssr: false });
 const BatchWorkspace = dynamic(() => import("@/components/BatchWorkspace"), { ssr: false, loading: ScreenLoading });
 const DeveloperContactModal = dynamic(() => import("@/components/DeveloperContactModal"), { ssr: false });
+const SignatureModal = dynamic(() => import("@/components/SignatureModal"), { ssr: false });
 
 let editorPrefetched = false;
 function prefetchEditor() {
@@ -119,7 +123,7 @@ export interface EditorSnapshot {
 const WORKFLOW_STEPS: { id: ScreenState; label: string; hint: string }[] = [
   { id: "welcome", label: "Photo", hint: "Add a portrait: drop a file, paste (Ctrl+V) or use the camera" },
   { id: "presets", label: "Size", hint: "Choose the passport, visa or ID size you need" },
-  { id: "adjust", label: "Edit", hint: "Check the guides — drag to move, scroll or pinch to zoom" },
+  { id: "adjust", label: "Edit", hint: "Check the guides: drag to move, scroll or pinch to zoom" },
   { id: "print-sheet", label: "Print", hint: "Pick paper and copies, then export the print sheet" },
 ];
 
@@ -193,6 +197,7 @@ export default function Home() {
   // inline script in app/layout.tsx (saved choice, else the OS setting).
   const [theme, setTheme] = useState<"dark" | "light" | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const [showSignatureModal, setShowSignatureModal] = useState(false);
 
   // Session auto-save / crash recovery
   const [recoverableSession, setRecoverableSession] = useState<any | null>(null);
@@ -369,7 +374,7 @@ export default function Home() {
     try {
       localStorage.setItem("theme", theme);
     } catch {
-      /* storage unavailable — theme still applies for this session */
+      /* storage unavailable: theme still applies for this session */
     }
   }, [theme]);
 
@@ -650,23 +655,14 @@ export default function Home() {
   const handleBGRemoved = (processed: string) => {
     setProcessedImage(processed);
 
-    // Automatically apply AI Color & Lighting Enhancement
-    setBrightness(106);
-    setContrast(112);
-    setSaturation(105);
-    setExposure(102);
-
     // Set default backdrop color based on current preset's document standard
     const defaultBgColor = getPreset(preset).bgColor;
     setBgColor(defaultBgColor);
 
+    toast("Background removed with full original photo resolution.", "success");
     pushToHistory(
       buildSnapshot({
         processedImage: processed,
-        brightness: 106,
-        contrast: 112,
-        saturation: 105,
-        exposure: 102,
         bgColor: defaultBgColor,
       }),
     );
@@ -727,7 +723,7 @@ export default function Home() {
     setActiveScreen("welcome");
   };
 
-  // Full serialisable project state — shared by manual "Save Project" and the
+  // Full serialisable project state: shared by manual "Save Project" and the
   // background session auto-save.
   const buildProjectData = () => ({
     version: "2.0",
@@ -879,7 +875,7 @@ export default function Home() {
             JSON.stringify({ ...buildProjectData(), savedAt: Date.now() }),
           );
         } catch (e) {
-          // Storage quota exceeded (large base64 images) — stop retrying this session.
+          // Storage quota exceeded (large base64 images): stop retrying this session.
           autosaveBlockedRef.current = true;
         }
       });
@@ -976,11 +972,11 @@ export default function Home() {
         } else if (e.key === "2") {
           handlePresetChange("pan");
         } else if (e.key === "3") {
-          handlePresetChange("stamp");
+          handlePresetChange("upsc");
         } else if (e.key === "4") {
-          handlePresetChange("us");
+          handlePresetChange("neet_jee");
         } else if (e.key === "5") {
-          handlePresetChange("oci");
+          handlePresetChange("stamp");
         }
       }
     };
@@ -1028,65 +1024,51 @@ export default function Home() {
           : "Next";
 
   const footerHint =
-    activeScreen === "success" ? "Done — your print sheet PDF has been saved." : currentStep.hint;
+    activeScreen === "success" ? "Done: your print sheet PDF has been saved." : currentStep.hint;
 
   return (
-    <main className="classic-ui h-full w-full overflow-hidden flex flex-col bg-bg-app text-text-primary font-sans antialiased select-none relative">
+    <main className="classic-ui h-full w-full overflow-hidden flex flex-col bg-background text-foreground font-sans antialiased select-none relative">
       {/* ── Header ─────────────────────────────────────────────── */}
-      <header className="h-14 w-full border-b border-border-app bg-panel-app px-2 sm:px-4 flex items-center gap-2 sm:gap-4 z-30 shrink-0">
-        <div className="flex items-center gap-2.5 min-w-0 shrink-0">
-          <span className="w-8 h-8 rounded-lg bg-accent-app text-white flex items-center justify-center shrink-0">
-            <FiCamera className="w-[18px] h-[18px]" />
+      <header className="h-14 w-full border-b border-card-edge bg-background/80 backdrop-blur-md px-3 sm:px-6 flex items-center gap-3 sm:gap-6 z-30 shrink-0">
+        <div className="flex items-center gap-3 min-w-0 shrink-0">
+          <span className="w-8 h-8 btn-asym bg-neutral-900 text-white dark:bg-white dark:text-black flex items-center justify-center shrink-0">
+            <FiCamera className="w-4 h-4" />
           </span>
-          <div className="hidden md:block leading-tight min-w-0">
-            <div className="text-[15px] font-semibold tracking-tight truncate">Precision ID Studio</div>
-            <div className="text-[11px] text-text-secondary truncate">Passport &amp; ID photos</div>
+          <div className="hidden md:block leading-tight min-w-0 font-brand">
+            <div className="text-[15px] font-medium tracking-tight truncate">Precision ID</div>
+            <div className="text-[11px] text-neutral-400 truncate">Passport and ID photos</div>
           </div>
           {licenseState.type === "TRIAL" && (
-            <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium text-warning-app bg-warning-app/10 border border-warning-app/25 px-2 py-0.5 rounded-md whitespace-nowrap">
-              <FiClock className="w-3 h-3" /> Trial · {licenseState.daysRemaining} days left
+            <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-medium text-amber-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md whitespace-nowrap">
+              <FiClock className="w-3 h-3" /> Trial: {licenseState.daysRemaining} days left
             </span>
           )}
         </div>
 
-        {/* Stepper */}
+        {/* Stepper styled as ChaiUI Segmented control */}
         <nav aria-label="Workflow" className="flex-1 flex justify-center min-w-0">
-          <ol className="flex items-center gap-1 sm:gap-1.5">
+          <ol className="inline-flex items-center p-1 rounded-lg border border-border bg-black/40 backdrop-blur-sm dark:border-orange-50/10">
             {WORKFLOW_STEPS.map((step, idx) => {
               const isActive = idx === currentStepIndex;
               const isDone = idx < currentStepIndex;
               const reachable = step.id === "welcome" || !!originalImage;
               return (
                 <li key={step.id} className="flex items-center">
-                  {idx > 0 && (
-                    <span
-                      aria-hidden
-                      className={`h-px w-3 sm:w-6 mx-0.5 sm:mx-1 ${isDone || isActive ? "bg-accent-app/60" : "bg-border-app"}`}
-                    />
-                  )}
                   <button
                     type="button"
                     disabled={!reachable}
                     onClick={() => navigateToScreen(step.id)}
                     aria-current={isActive ? "step" : undefined}
-                    className={`flex items-center gap-1.5 rounded-full pl-1 pr-1 sm:pr-3 py-1 text-[13px] transition-colors cursor-pointer disabled:cursor-not-allowed ${
+                    className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-xs sm:text-sm font-medium transition-colors cursor-pointer disabled:cursor-not-allowed ${
                       isActive
-                        ? "bg-accent-app/10 text-accent-app font-semibold"
+                        ? "bg-orange-100 text-orange-900 dark:bg-orange-900/40 dark:text-orange-100"
                         : isDone
-                          ? "text-text-primary hover:bg-card-app"
-                          : "text-text-secondary hover:bg-card-app disabled:hover:bg-transparent disabled:opacity-60"
+                          ? "text-foreground hover:text-neutral-200"
+                          : "text-neutral-500 hover:text-neutral-300 disabled:opacity-40"
                     }`}
                   >
-                    <span
-                      className={`w-6 h-6 rounded-full flex items-center justify-center text-[12px] font-semibold shrink-0 ${
-                        isActive
-                          ? "bg-accent-app text-white"
-                          : isDone
-                            ? "bg-success-app text-white"
-                            : "bg-card-app border border-border-app text-text-secondary"
-                      }`}
-                    >
-                      {isDone ? <FiCheck className="w-3.5 h-3.5" /> : idx + 1}
+                    <span className="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-semibold">
+                      {isDone ? <FiCheck className="w-3.5 h-3.5 text-emerald-400" /> : idx + 1}
                     </span>
                     <span className={isActive ? "inline" : "hidden sm:inline"}>{step.label}</span>
                   </button>
@@ -1126,6 +1108,15 @@ export default function Home() {
                     : "Offline"}
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setShowSignatureModal(true)}
+            className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-accent-app/40 bg-accent-app/10 hover:bg-accent-app/20 text-accent-app text-[12px] font-bold transition-all cursor-pointer mr-1"
+            title="Signature & Thumb Impression Studio (UPSC, SSC, IBPS, PAN, NEET)"
+          >
+            <FaSignature className="w-3.5 h-3.5" />
+            <span>Sign Studio</span>
+          </button>
           <IconButton title={theme === "dark" ? "Light theme" : "Dark theme"} onClick={toggleTheme}>
             {theme === "dark" ? <FiSun className="w-[18px] h-[18px]" /> : <FiMoon className="w-[18px] h-[18px]" />}
           </IconButton>
@@ -1146,6 +1137,7 @@ export default function Home() {
           <div className="flex flex-col gap-1 w-full px-1.5">
             <ToolButton icon={<FiUpload className="w-5 h-5" />} label="Open" title="Open photo (Ctrl+O)" onClick={() => handleLeftToolbarAction("import")} />
             <ToolButton icon={<FiCamera className="w-5 h-5" />} label="Camera" title="Take a photo with the camera" onClick={() => handleLeftToolbarAction("camera")} />
+            <ToolButton icon={<FaSignature className="w-4 h-4 text-accent-app" />} label="Sign / LTI" title="Signature & Thumb Impression Studio" onClick={() => setShowSignatureModal(true)} />
             <div className="h-px bg-border-app my-1.5 mx-3" />
             <ToolButton icon={<BsStars className="w-5 h-5" />} label="Cut-out" title="Remove background (B)" disabled={!originalImage || isProcessing} onClick={() => handleLeftToolbarAction("remove-bg")} />
             <ToolButton icon={<FaMagic className="w-[18px] h-[18px]" />} label="Align" title="Auto-align face (Space)" disabled={!originalImage} onClick={() => handleLeftToolbarAction("auto-align")} />
@@ -1168,21 +1160,25 @@ export default function Home() {
           }
           className="flex-1 min-w-0 min-h-0 relative screen-enter">
           {activeScreen === "welcome" ? (
-            <div className="h-full overflow-y-auto panel-scrollbar">
-              <div className="w-full max-w-2xl mx-auto px-4 py-6 sm:py-10 flex flex-col gap-5">
-                <div className="text-center space-y-1.5">
-                  <h1 className="app-heading">Create a passport photo</h1>
-                  <p className="text-[14px] text-text-secondary">
-                    Add a portrait to begin. Everything runs on this device — your photos never leave it.
+            <div className="h-full overflow-y-auto panel-scrollbar relative">
+              <ChaiBackdrop />
+              <div className="relative z-10 w-full max-w-2xl mx-auto px-4 py-8 sm:py-12 flex flex-col gap-6">
+                <div className="text-center space-y-3 flex flex-col items-center">
+                  <AnimatedBadge>On-device neural AI</AnimatedBadge>
+                  <h1 className="text-3xl sm:text-4xl lg:text-5xl font-semibold tracking-tight text-foreground">
+                    Create a passport photo
+                  </h1>
+                  <p className="text-sm sm:text-base text-neutral-400 max-w-xl">
+                    Add a portrait to begin with <span className="highlight">on-device AI processing</span> so your photos never leave this computer.
                   </p>
                 </div>
 
                 {recoverableSession && (
-                  <div className="flex flex-wrap items-center gap-3 bg-card-app border border-border-app rounded-lg px-4 py-3 elevate-sm">
-                    <FiClock className="w-4 h-4 text-accent-app shrink-0" />
+                  <div className="flex flex-wrap items-center gap-3 card-chai px-4 py-3">
+                    <FiClock className="w-4 h-4 text-amber-500 shrink-0" />
                     <div className="flex-1 min-w-[180px]">
-                      <p className="text-[14px] font-medium">Continue where you left off?</p>
-                      <p className="text-[12px] text-text-secondary">
+                      <p className="text-[14px] font-medium text-foreground">Continue where you left off?</p>
+                      <p className="text-[12px] text-neutral-400">
                         Unsaved work
                         {recoverableSession.savedAt
                           ? ` from ${new Date(recoverableSession.savedAt).toLocaleString()}`
@@ -1191,10 +1187,10 @@ export default function Home() {
                       </p>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={handleDismissSession} className="studio-btn studio-btn-ghost !min-h-9 !px-3 text-[14px]">
+                      <button onClick={handleDismissSession} className="btn-asym-mirror inline-flex h-8 items-center px-3 text-xs font-medium border border-border hover:bg-neutral-800">
                         Discard
                       </button>
-                      <button onClick={handleRestoreSession} className="studio-btn studio-btn-primary !min-h-9 !px-3 text-[14px]">
+                      <button onClick={handleRestoreSession} className="btn-asym inline-flex h-8 items-center px-3 text-xs font-medium bg-white text-black hover:bg-neutral-200">
                         Restore
                       </button>
                     </div>
@@ -1207,17 +1203,17 @@ export default function Home() {
                   onProjectLoad={handleProjectLoad}
                 />
 
-                <div className="bg-card-app border border-border-app rounded-lg p-4 elevate-sm">
-                  <h2 className="text-[13px] font-semibold text-text-primary mb-3">Tips for an accepted photo</h2>
-                  <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="card-chai p-5 sm:p-6">
+                  <h2 className="text-sm sm:text-base font-medium text-foreground mb-4">Tips for an accepted photo</h2>
+                  <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                     {PHOTO_TIPS.map((tip) => (
                       <li key={tip.title} className="flex items-start gap-2.5">
-                        <span className="w-7 h-7 rounded-md bg-accent-app/10 text-accent-app flex items-center justify-center shrink-0">
+                        <span className="w-7 h-7 rounded-md border border-white/10 bg-white/5 text-neutral-300 flex items-center justify-center shrink-0">
                           {tip.icon}
                         </span>
                         <span className="leading-tight">
-                          <span className="block text-[13px] font-medium">{tip.title}</span>
-                          <span className="block text-[12px] text-text-secondary">{tip.text}</span>
+                          <span className="block text-[13px] font-medium text-foreground">{tip.title}</span>
+                          <span className="block text-[12px] text-neutral-400">{tip.text}</span>
                         </span>
                       </li>
                     ))}
@@ -1238,15 +1234,15 @@ export default function Home() {
                     keeps its exact {getPreset(preset).widthMm} × {getPreset(preset).heightMm} mm size.
                   </p>
                 </div>
-                <div className="w-full grid gap-2 pt-2">
-                  <button onClick={() => setActiveScreen("print-sheet")} className="studio-btn studio-btn-secondary w-full">
+                <div className="w-full grid gap-2.5 pt-2">
+                  <button onClick={() => setActiveScreen("print-sheet")} className="btn-asym-mirror w-full flex items-center justify-center gap-2 py-2.5 text-xs font-medium border border-border hover:bg-neutral-800">
                     <FiPrinter className="w-4 h-4" /> Change layout or export again
                   </button>
-                  <button onClick={handleSaveProject} disabled={!originalImage} className="studio-btn studio-btn-secondary w-full">
+                  <button onClick={handleSaveProject} disabled={!originalImage} className="btn-asym-mirror w-full flex items-center justify-center gap-2 py-2.5 text-xs font-medium border border-border hover:bg-neutral-800 disabled:opacity-40">
                     <FiSave className="w-4 h-4" /> Save project for later
                   </button>
-                  <button onClick={handleReset} className="studio-btn studio-btn-primary w-full">
-                    <FiCamera className="w-4 h-4" /> Start a new photo
+                  <button onClick={handleReset} className="btn-asym w-full flex items-center justify-center gap-2 py-2.5 text-xs font-medium bg-white text-black hover:bg-neutral-200">
+                    <FiCamera className="w-4 h-4" /> Start a new photo <ArrowUpRight className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -1448,10 +1444,10 @@ export default function Home() {
       </section>
 
       {/* ── Footer ─────────────────────────────────────────────── */}
-      <footer className="h-16 w-full border-t border-border-app bg-panel-app px-2 sm:px-4 flex items-center gap-2 sm:gap-4 z-30 shrink-0 pb-[env(safe-area-inset-bottom)]">
+      <footer className="h-16 w-full border-t border-orange-500/10 bg-panel-app/80 backdrop-blur-md px-2 sm:px-4 flex items-center gap-2 sm:gap-4 z-30 shrink-0 pb-[env(safe-area-inset-bottom)]">
         <div className="flex items-center gap-1 shrink-0">
           {activeScreen !== "welcome" && (
-            <button onClick={handleReset} className="studio-btn studio-btn-ghost !px-2.5 sm:!px-3" title="Start over">
+            <button onClick={handleReset} className="h-9 px-2.5 sm:px-3 text-xs font-medium text-neutral-400 hover:text-foreground flex items-center gap-1.5 transition-colors cursor-pointer" title="Start over">
               <FiRotateCcw className="w-4 h-4" />
               <span className="hidden sm:inline">Start over</span>
             </button>
@@ -1474,7 +1470,7 @@ export default function Home() {
             <span><kbd className="font-sans font-semibold">Ctrl+V</kbd> paste</span>
             <span><kbd className="font-sans font-semibold">Space</kbd> auto-align</span>
             <span><kbd className="font-sans font-semibold">B</kbd> cut-out</span>
-            <span><kbd className="font-sans font-semibold">1–5</kbd> sizes</span>
+            <span><kbd className="font-sans font-semibold">1 to 5</kbd> sizes</span>
             <span><kbd className="font-sans font-semibold">Ctrl+P</kbd> export</span>
           </span>
         </div>
@@ -1482,19 +1478,19 @@ export default function Home() {
 
         <div className="flex items-center gap-2 shrink-0">
           {activeScreen !== "welcome" && (
-            <button onClick={goBack} className="studio-btn studio-btn-secondary !px-3 sm:!px-4">
+            <button onClick={goBack} className="btn-asym-mirror inline-flex items-center gap-1.5 h-9 px-3 sm:px-4 text-xs font-medium border border-border hover:bg-neutral-800 cursor-pointer">
               <FiChevronLeft className="w-4 h-4" />
               <span className="hidden sm:inline">Back</span>
             </button>
           )}
           <button
             onClick={goNext}
-            className={`studio-btn ${activeScreen === "print-sheet" ? "studio-btn-success" : "studio-btn-primary"}`}
+            className="btn-asym inline-flex items-center gap-2 h-9 px-4 sm:px-5 text-xs font-medium bg-white text-black hover:bg-neutral-200 cursor-pointer"
           >
             {activeScreen === "print-sheet" && <FiPrinter className="w-4 h-4" />}
             {activeScreen === "welcome" && <FiUpload className="w-4 h-4" />}
             {nextLabel}
-            {(activeScreen === "presets" || activeScreen === "adjust") && <FiChevronRight className="w-4 h-4" />}
+            {(activeScreen === "presets" || activeScreen === "adjust") && <ArrowUpRight className="w-4 h-4" />}
           </button>
         </div>
       </footer>
@@ -1523,6 +1519,7 @@ export default function Home() {
       />
 
       {showHelpModal && <DeveloperContactModal isOpen onClose={() => setShowHelpModal(false)} />}
+      {showSignatureModal && <SignatureModal isOpen onClose={() => setShowSignatureModal(false)} />}
     </main>
   );
 }

@@ -110,7 +110,7 @@ export default function MultiPersonPanel({
       {isMultiPersonMode && (
         <div className="space-y-3 pt-2.5 border-t border-border-app/40 animate-fadeIn">
           <p className="text-[10px] text-accent-app font-semibold pl-0.5">
-            Upload different person photos — each row on the A4 sheet will be a different person (6 photos per row).
+            Upload different person photos: each row on the A4 sheet will be a different person (6 photos per row).
           </p>
 
           <div className="grid grid-cols-3 gap-2">

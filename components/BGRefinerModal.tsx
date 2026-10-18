@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { FiScissors, FiSettings } from 'react-icons/fi';
 import { FaEraser, FaPaintBrush, FaRegLightbulb, FaHandPaper } from 'react-icons/fa';
 import { BsStars } from 'react-icons/bs';
+import { ArrowUpRight } from 'lucide-react';
 
 interface BGRefinerModalProps {
   isOpen: boolean;
@@ -850,7 +851,7 @@ export default function BGRefinerModal({
   if (!isOpen || !mounted) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex flex-col md:flex-row bg-bg-app/98 backdrop-blur-xl border border-border-app shadow-2xl overflow-hidden text-text-primary select-none animate-in fade-in duration-300">
+    <div className="fixed inset-0 z-[100] flex flex-col md:flex-row bg-bg-app/98 backdrop-blur-xl border border-border-app overflow-hidden text-text-primary select-none animate-in fade-in duration-300">
       
       {/* Left Workspace Panel: Interactive Drawing Area */}
       <div ref={containerRef} className="flex-1 relative flex flex-col min-h-0 bg-bg-app">
@@ -858,25 +859,25 @@ export default function BGRefinerModal({
         {/* Workspace Toolbar */}
         <div className="flex items-center justify-between border-b border-border-app bg-bg-app/70 p-4 backdrop-blur-md z-10">
           <div className="flex items-center gap-3">
-            <h2 className="text-sm font-black uppercase tracking-wider text-accent-app flex items-center gap-1.5">
-              <FiScissors className="w-4 h-4 text-accent-app" /> Refine Cutout Editor
+            <h2 className="text-sm font-semibold tracking-tight text-foreground flex items-center gap-1.5">
+              <FiScissors className="w-4 h-4 text-foreground" /> Refine cutout editor
             </h2>
             <span className="w-1.5 h-3 bg-border-app" />
-            <p className="hidden sm:block text-xs text-text-secondary font-semibold">
-              Paint to Erase/Restore background details manually
+            <p className="hidden sm:block text-xs text-text-secondary font-medium">
+              Paint to erase or restore background details manually
             </p>
           </div>
           
           <div className="flex items-center gap-2">
             {/* Zoom Percentage */}
-            <span className="text-[11px] font-extrabold text-text-secondary bg-card-app/40 px-2.5 py-1 rounded-lg border border-border-app shadow-sm select-none">
+            <span className="text-[11px] font-semibold text-text-secondary bg-card-app/40 px-2.5 py-1 rounded-lg border border-border-app select-none">
               {Math.round(zoomScale * 100)}%
             </span>
             
             {/* Zoom Controls */}
             <button
               onClick={() => handleZoomChange(1.25)}
-              className="px-2.5 py-1 rounded-lg bg-card-app border border-border-app hover:bg-border-app text-[11.5px] font-black text-text-secondary hover:text-text-primary cursor-pointer shadow active:scale-[0.97] transition-all"
+              className="px-2.5 py-1 rounded-lg bg-card-app border border-border-app hover:bg-border-app text-[11.5px] font-semibold text-text-secondary hover:text-text-primary cursor-pointer active:scale-[0.97] transition-all"
               title="Zoom In"
             >
               +
@@ -962,13 +963,13 @@ export default function BGRefinerModal({
           
           {/* Tool Selector Section */}
           <div className="space-y-2">
-            <h3 className="text-[10px] font-black text-text-secondary uppercase tracking-widest pl-0.5">Select Tool</h3>
+            <h3 className="text-xs font-semibold text-text-secondary pl-0.5">Select tool</h3>
             <div className="grid grid-cols-3 gap-2">
               <button
                 onClick={() => setBrushMode('erase')}
                 className={`py-2 px-2.5 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all cursor-pointer select-none
                   ${brushMode === 'erase'
-                    ? 'bg-rose-500/10 border-rose-500/40 text-rose-300 ring-1 ring-rose-500/20 shadow-[0_0_12px_rgba(239,68,68,0.2)]'
+                    ? 'bg-rose-500/10 border-rose-500/40 text-rose-300 ring-1 ring-rose-500/20'
                     : 'bg-card-app/40 border-border-app text-text-secondary hover:bg-card-app hover:text-text-primary'
                   }
                 `}
@@ -1007,14 +1008,14 @@ export default function BGRefinerModal({
 
           {/* Brush Settings Slider Panel */}
           {brushMode !== 'pan' && (
-            <div className="bg-card-app border border-border-app rounded-2xl p-4 space-y-3 shadow-md">
-              <h3 className="text-xs font-bold text-text-primary flex items-center gap-1.5">
-                <FiSettings className="w-4 h-4 text-text-secondary" /> Brush Settings
+            <div className="card-chai rounded-2xl p-4 space-y-3">
+              <h3 className="text-xs font-semibold text-text-primary flex items-center gap-1.5">
+                <FiSettings className="w-4 h-4 text-text-secondary" /> Brush settings
               </h3>
               
               {/* Brush Size Slider */}
               <div className="space-y-1">
-                <div className="flex justify-between text-[11px] font-bold text-text-secondary">
+                <div className="flex justify-between text-[11px] font-semibold text-text-secondary">
                   <span>Size</span>
                   <span>{brushSize} px</span>
                 </div>
@@ -1030,8 +1031,8 @@ export default function BGRefinerModal({
 
               {/* Brush Hardness Slider */}
               <div className="space-y-1">
-                <div className="flex justify-between text-[11px] font-bold text-text-secondary">
-                  <span>Edge Hardness</span>
+                <div className="flex justify-between text-[11px] font-semibold text-text-secondary">
+                  <span>Edge hardness</span>
                   <span>{Math.round(brushHardness * 100)}%</span>
                 </div>
                 <input
@@ -1048,9 +1049,9 @@ export default function BGRefinerModal({
           )}
 
           {/* Edge Refinements Sliders (Feathering and Trim) */}
-          <div className="bg-card-app border border-border-app rounded-2xl p-4 space-y-3.5 shadow-md">
-            <h3 className="text-xs font-bold text-accent-app flex items-center gap-1.5">
-              <BsStars className="w-4 h-4 text-accent-app" /> Edge Refinements
+          <div className="card-chai rounded-2xl p-4 space-y-3.5">
+            <h3 className="text-xs font-semibold text-text-primary flex items-center gap-1.5">
+              <BsStars className="w-4 h-4 text-accent-app" /> Edge refinements
             </h3>
             
             {/* Edge Trim Slider */}
@@ -1129,7 +1130,7 @@ export default function BGRefinerModal({
           </div>
           {/* Background Previews Selector */}
           <div className="space-y-2">
-            <h3 className="text-[10px] font-black text-text-secondary uppercase tracking-widest pl-0.5">Test Background</h3>
+            <h3 className="text-xs font-semibold text-text-secondary pl-0.5">Test background</h3>
             <div className="flex gap-2">
               {[
                 { name: 'Grid', value: 'checkerboard', class: 'bg-bg-app border-border-app' },
@@ -1159,7 +1160,7 @@ export default function BGRefinerModal({
 
           {/* Reset Mask Operations */}
           <div className="space-y-2">
-            <h3 className="text-[10px] font-black text-text-secondary uppercase tracking-widest pl-0.5">Reset Operations</h3>
+            <h3 className="text-xs font-semibold text-text-secondary pl-0.5">Reset operations</h3>
             <div className="grid grid-cols-2 gap-2">
               {aiTransparentImage && (
                 <button
@@ -1186,36 +1187,39 @@ export default function BGRefinerModal({
         </div>
 
         {/* Modal Controls: Cancel & Apply */}
-        <div className="border-t border-border-app p-4 bg-bg-app/80 space-y-2 shrink-0">
+        <div className="border-t border-orange-500/10 p-4 bg-bg-app/80 space-y-2 shrink-0">
           <button
             onClick={handleApply}
             disabled={isProcessing}
-            className={`w-full py-2.5 rounded-xl text-sm font-extrabold flex items-center justify-center gap-2 cursor-pointer shadow-lg transition-all
+            className={`btn-asym w-full py-2.5 text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors
               ${isProcessing
-                ? 'bg-accent-app/20 text-accent-app border border-accent-app/30 cursor-wait'
-                : 'bg-accent-app hover:bg-accent-hover text-white border border-accent-app/20 hover:scale-[1.01] active:scale-[0.99]'
+                ? 'opacity-50 cursor-wait bg-white text-black'
+                : 'bg-white text-black hover:bg-neutral-200'
               }
             `}
           >
             {isProcessing ? (
               <>
-                <svg className="animate-spin h-4 w-4 text-accent-app" viewBox="0 0 24 24">
+                <svg className="animate-spin h-4 w-4 text-black" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
-                <span>Processing Cutout...</span>
+                <span>Processing cutout...</span>
               </>
             ) : (
-              'Apply & Save Edits'
+              <>
+                <span>Apply and save edits</span>
+                <ArrowUpRight className="w-4 h-4" />
+              </>
             )}
           </button>
           
           <button
             onClick={onClose}
             disabled={isProcessing}
-            className="w-full py-2 rounded-xl bg-card-app hover:bg-panel-app border border-border-app text-xs font-bold text-text-secondary hover:text-text-primary cursor-pointer transition-micro"
+            className="btn-asym-mirror w-full py-2 text-xs font-medium border border-border text-neutral-400 hover:text-foreground cursor-pointer transition-colors"
           >
-            Discard Changes
+            Discard changes
           </button>
         </div>
       </div>

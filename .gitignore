@@ -32,6 +32,14 @@
 *.AppImage
 *.blockmap
 
+# android & mobile artifacts
+*.apk
+*.aab
+emulator_screenshot*.png
+emulator_screenshot*.jpg
+.gradle/
+local.properties
+
 # AI model assets (downloaded/generated; very large)
 /public/models/
 

@@ -9,7 +9,7 @@ interface CropSliderProps {
   step?: number;
   suffix?: string;
   onChange: (value: number) => void;
-  /** Called when a change is committed (slider released, +/- pressed) — used for undo snapshots. */
+  /** Called when a change is committed (slider released, +/- pressed), used for undo snapshots. */
   onMouseUp?: () => void;
   accentClass?: string;
 }

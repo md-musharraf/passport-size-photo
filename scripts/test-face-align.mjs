@@ -26,6 +26,8 @@ const PRESETS = {
   us: { widthMm: 50.8, heightMm: 50.8, headMinPct: 50, headMaxPct: 69, eyeMinPct: 34, eyeMaxPct: 45 },
   in: { widthMm: 35, heightMm: 45, headMinPct: 60, headMaxPct: 80, eyeMinPct: 30, eyeMaxPct: 45 },
   ca: { widthMm: 50, heightMm: 70, headMinPct: 44, headMaxPct: 51, eyeMinPct: 30, eyeMaxPct: 40 },
+  upsc: { widthMm: 35, heightMm: 45, headMinPct: 60, headMaxPct: 75, eyeMinPct: 30, eyeMaxPct: 45 },
+  pan: { widthMm: 25, heightMm: 35, headMinPct: 55, headMaxPct: 75, eyeMinPct: 28, eyeMaxPct: 48 },
 };
 
 // Synthetic face: eyes, crown and chin around a centre point, optionally rolled.
@@ -69,6 +71,8 @@ const cases = [
   ['landscape photo → India 35x45', 1600, 1200, PRESETS.in],
   ['square photo → Canada 50x70', 1000, 1000, PRESETS.ca],
   ['portrait photo → India 35x45', 820, 1024, PRESETS.in],
+  ['portrait photo → UPSC 35x45', 1200, 1600, PRESETS.upsc],
+  ['phone photo → PAN 25x35', 1080, 1920, PRESETS.pan],
 ];
 
 for (const [name, w, h, preset] of cases) {

@@ -161,7 +161,7 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
             serverStatus = 'DELETED';
             setRemoteStatus('DELETED');
           } else if (response.status === 404) {
-            // Record deleted from dashboard — this machine is no longer registered
+            // Record deleted from dashboard: this machine is no longer registered
             serverStatus = 'DELETED';
             setRemoteStatus('DELETED');
           } else {
@@ -363,37 +363,37 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
         {/* Modal Settings Overlay when settings is opened inside the valid app */}
         {showSettings && !isWebDemo && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[10000] flex items-center justify-center p-4 animate-fadeIn">
-            <div className="w-full max-w-lg bg-[#161b22] border border-neutral-800 rounded-3xl p-6 md:p-8 shadow-2xl relative space-y-6 text-white font-sans">
+            <div className="w-full max-w-lg card-chai rounded-2xl p-6 md:p-8 relative space-y-6 text-foreground font-sans">
               <button
                 onClick={() => setShowSettings(false)}
-                className="absolute top-6 right-6 w-8 h-8 rounded-lg border border-neutral-800 bg-[#161b22]/50 hover:bg-[#21262d] text-neutral-400 hover:text-white transition-all flex items-center justify-center cursor-pointer"
+                className="absolute top-6 right-6 w-8 h-8 rounded-lg border border-border bg-card-chai text-neutral-400 hover:text-white transition-colors flex items-center justify-center cursor-pointer"
               >
                 <FiX className="w-4 h-4" />
               </button>
 
               <div className="text-center space-y-2">
-                <div className="mx-auto w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/10">
-                  <FiGlobe className="w-6 h-6 text-white" />
+                <div className="mx-auto w-12 h-12 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-foreground">
+                  <FiGlobe className="w-6 h-6 text-foreground" />
                 </div>
-                <h2 className="text-[22px] font-extrabold tracking-tight text-white mt-4">
-                  Dashboard Connection
+                <h2 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground mt-4">
+                  Dashboard connection
                 </h2>
-                <p className="text-[10px] tracking-widest text-indigo-400 font-black uppercase">
-                  Configure Sync Endpoint URL
+                <p className="text-xs text-neutral-400 font-medium">
+                  Configure sync endpoint URL
                 </p>
               </div>
 
               <div className="space-y-4">
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest pl-0.5">
-                    Admin Dashboard URL
+                  <label className="text-xs font-medium text-neutral-400 pl-0.5">
+                    Admin dashboard URL
                   </label>
                   <input
                     type="text"
                     value={dashboardUrlInput}
                     onChange={(e) => setDashboardUrlInput(e.target.value)}
                     placeholder="http://localhost:3001 or https://..."
-                    className="w-full bg-[#0d1117] border border-neutral-800 focus:border-indigo-500 text-neutral-200 text-xs font-mono rounded-xl px-4 py-3 outline-none transition-colors placeholder:text-neutral-600"
+                    className="w-full bg-[#0d1117] border border-neutral-800 focus:border-amber-500/50 text-neutral-200 text-xs font-mono rounded-xl px-4 py-3 outline-none transition-colors placeholder:text-neutral-600"
                   />
                   <p className="text-[10px] text-neutral-500 font-semibold pl-0.5 mt-1 leading-relaxed">
                     The desktop app will sync subscription blocks (Pause, Stop, Delete) from this URL.
@@ -420,10 +420,10 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
                     {connectionStatus === 'connected' 
                       ? `Connected to dashboard${lastSyncTime ? ` · Last sync: ${lastSyncTime}` : ''}`
                       : connectionStatus === 'unconfigured'
-                      ? 'Dashboard URL not configured — enter your deployed admin URL above'
+                      ? 'Dashboard URL not configured: enter your deployed admin URL above'
                       : connectionStatus === 'checking'
                       ? 'Checking connection...'
-                      : 'Cannot reach dashboard — verify the URL is correct and the dashboard is online'}
+                      : 'Cannot reach dashboard: verify the URL is correct and the dashboard is online'}
                   </span>
                 </div>
 
@@ -437,14 +437,14 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
                 <div className="flex gap-2">
                   <button
                     onClick={handleSaveDashboardUrl}
-                    className="flex-1 py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-lg shadow-indigo-500/5 active:scale-98 flex items-center justify-center gap-1.5"
+                    className="btn-asym flex-1 py-3 bg-white text-black hover:bg-neutral-200 text-xs font-semibold cursor-pointer transition-colors flex items-center justify-center gap-1.5"
                   >
                     <FiSave className="w-4 h-4" />
-                    <span>Save Configuration</span>
+                    <span>Save configuration</span>
                   </button>
                   <button
                     onClick={() => setShowSettings(false)}
-                    className="py-3 px-4 rounded-xl border border-neutral-800 hover:border-neutral-700 bg-[#21262d] text-neutral-300 hover:text-white text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                    className="btn-asym-mirror py-3 px-4 border border-border hover:bg-neutral-800 text-neutral-300 hover:text-white text-xs font-medium cursor-pointer transition-colors flex items-center justify-center gap-1.5"
                   >
                     <span>Close</span>
                   </button>
@@ -478,30 +478,30 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
       <div className="absolute bottom-1/4 right-1/4 translate-x-1/2 translate-y-1/2 w-[450px] h-[450px] rounded-full bg-orange-600/5 blur-[150px] pointer-events-none" />
 
       {showSettings ? (
-        <div className="w-full max-w-lg bg-[#161b22]/70 border border-neutral-800 rounded-3xl p-6 md:p-8 backdrop-blur-xl shadow-2xl relative z-10 space-y-6 animate-fadeIn">
+        <div className="w-full max-w-lg card-chai rounded-2xl p-6 md:p-8 backdrop-blur-xl relative z-10 space-y-6 animate-fadeIn">
           <div className="text-center space-y-2">
-            <div className="mx-auto w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/10">
-              <FiGlobe className="w-6 h-6 text-white" />
+            <div className="mx-auto w-12 h-12 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-foreground">
+              <FiGlobe className="w-6 h-6 text-foreground" />
             </div>
-            <h2 className="text-[22px] font-extrabold tracking-tight text-white mt-4">
-              Dashboard Connection
+            <h2 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground mt-4">
+              Dashboard connection
             </h2>
-            <p className="text-[10px] tracking-widest text-indigo-400 font-black uppercase">
-              Configure Sync Endpoint URL
+            <p className="text-xs text-neutral-400 font-medium">
+              Configure sync endpoint URL
             </p>
           </div>
 
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest pl-0.5">
-                Admin Dashboard URL
+              <label className="text-xs font-medium text-neutral-400 pl-0.5">
+                Admin dashboard URL
               </label>
               <input
                 type="text"
                 value={dashboardUrlInput}
                 onChange={(e) => setDashboardUrlInput(e.target.value)}
                 placeholder="http://localhost:3001 or https://..."
-                className="w-full bg-[#0d1117] border border-neutral-800 focus:border-indigo-500 text-neutral-200 text-xs font-mono rounded-xl px-4 py-3 outline-none transition-colors placeholder:text-neutral-600"
+                className="w-full bg-[#0d1117] border border-neutral-800 focus:border-amber-500/50 text-neutral-200 text-xs font-mono rounded-xl px-4 py-3 outline-none transition-colors placeholder:text-neutral-600"
               />
               <p className="text-[10px] text-neutral-500 font-semibold pl-0.5 mt-1 leading-relaxed">
                 The desktop app will sync subscription blocks (Pause, Stop, Delete) from this URL.
@@ -528,10 +528,10 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
                 {connectionStatus === 'connected' 
                   ? `Connected to dashboard${lastSyncTime ? ` · Last sync: ${lastSyncTime}` : ''}`
                   : connectionStatus === 'unconfigured'
-                  ? 'Dashboard URL not configured — enter your deployed admin URL above'
+                  ? 'Dashboard URL not configured: enter your deployed admin URL above'
                   : connectionStatus === 'checking'
                   ? 'Checking connection...'
-                  : 'Cannot reach dashboard — verify the URL is correct and the dashboard is online'}
+                  : 'Cannot reach dashboard: verify the URL is correct and the dashboard is online'}
               </span>
             </div>
 
@@ -545,14 +545,14 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
             <div className="flex gap-2">
               <button
                 onClick={handleSaveDashboardUrl}
-                className="flex-1 py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-lg shadow-indigo-500/5 active:scale-98 flex items-center justify-center gap-1.5"
+                className="btn-asym flex-1 py-3 bg-white text-black hover:bg-neutral-200 text-xs font-semibold cursor-pointer transition-colors flex items-center justify-center gap-1.5"
               >
                 <FiSave className="w-4 h-4" />
-                <span>Save Configuration</span>
+                <span>Save configuration</span>
               </button>
               <button
                 onClick={() => setShowSettings(false)}
-                className="py-3 px-4 rounded-xl border border-neutral-800 hover:border-neutral-700 bg-[#21262d] text-neutral-300 hover:text-white text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                className="btn-asym-mirror py-3 px-4 border border-border hover:bg-neutral-800 text-neutral-300 hover:text-white text-xs font-medium cursor-pointer transition-colors flex items-center justify-center gap-1.5"
               >
                 <span>Close</span>
               </button>
@@ -560,18 +560,18 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       ) : (
-        <div className="w-full max-w-lg bg-[#161b22]/70 border border-neutral-800 rounded-3xl p-6 md:p-8 backdrop-blur-xl shadow-2xl relative z-10 space-y-6">
+        <div className="w-full max-w-lg card-chai rounded-2xl p-6 md:p-8 backdrop-blur-xl relative z-10 space-y-6">
           
           {/* Header Logo */}
           <div className="text-center space-y-2">
-            <div className="mx-auto w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/10">
-              <FiLock className="w-6 h-6 text-black" />
+            <div className="mx-auto w-12 h-12 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-foreground">
+              <FiLock className="w-6 h-6 text-foreground" />
             </div>
-            <h2 className="text-[22px] font-extrabold tracking-tight text-white mt-4">
+            <h2 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground mt-4">
               Precision ID Studio
             </h2>
-            <p className="text-[10px] tracking-widest text-amber-500/80 font-black uppercase">
-              Biometric Security Console Lock
+            <p className="text-xs text-neutral-400 font-medium">
+              Biometric security console lock
             </p>
           </div>
 
@@ -608,8 +608,8 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
 
           {/* Machine ID Box */}
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest pl-0.5">
-              Your Device Machine ID
+            <label className="text-xs font-medium text-neutral-400 pl-0.5">
+              Your device machine ID
             </label>
             <div className="flex gap-2">
               <div className="flex-1 px-4 py-2.5 bg-[#0d1117] border border-neutral-800 rounded-xl font-mono text-[12px] text-neutral-300 select-all truncate flex items-center">
@@ -634,16 +634,16 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
           {/* Key Paste Form */}
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest pl-0.5">
-                Enter License Key
+              <label className="text-xs font-medium text-neutral-400 pl-0.5">
+                Enter license key
               </label>
               <input
                 type="text"
                 value={licenseKeyInput}
                 onChange={(e) => setLicenseKeyInput(e.target.value)}
                 disabled={isActivating || remoteStatus === 'PAUSED' || remoteStatus === 'STOPPED'}
-                placeholder="PASTE 256-BIT CRYPTO KEY..."
-                className="w-full bg-[#0d1117] border border-neutral-800 focus:border-amber-500 text-neutral-200 text-xs font-mono rounded-xl px-4 py-3 outline-none transition-colors placeholder:text-neutral-600 disabled:opacity-50"
+                placeholder="Paste 256-bit crypto key..."
+                className="w-full bg-[#0d1117] border border-neutral-800 focus:border-amber-500/50 text-neutral-200 text-xs font-mono rounded-xl px-4 py-3 outline-none transition-colors placeholder:text-neutral-600 disabled:opacity-50"
               />
             </div>
 
@@ -665,7 +665,7 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
               <button
                 onClick={() => activateKey(licenseKeyInput)}
                 disabled={isActivating || !licenseKeyInput.trim() || remoteStatus === 'PAUSED' || remoteStatus === 'STOPPED'}
-                className="flex-1 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 disabled:opacity-40 text-black text-xs font-black uppercase tracking-wider transition-all cursor-pointer shadow-lg shadow-amber-500/5 active:scale-98 flex items-center justify-center gap-1.5"
+                className="btn-asym flex-1 py-3 bg-white text-black hover:bg-neutral-200 disabled:opacity-40 text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1.5"
               >
                 {isActivating ? (
                   <>
@@ -675,7 +675,7 @@ export function LicenseProvider({ children }: { children: React.ReactNode }) {
                 ) : (
                   <>
                     <FiUnlock className="w-4 h-4" />
-                    <span>Activate Software</span>
+                    <span>Activate software</span>
                   </>
                 )}
               </button>

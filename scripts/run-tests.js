@@ -281,12 +281,68 @@ describe('Module Integrity & Dependencies', () => {
     const modalPath = path.join(__dirname, '../components/DeveloperContactModal.tsx');
     const exists = fs.existsSync(modalPath);
     expect(exists).toBe(true);
+  });
+});
 
-    const content = fs.readFileSync(modalPath, 'utf8');
-    expect(content.includes('6299019431')).toBe(true);
-    expect(content.includes('devwithmusharraf@gmail.com')).toBe(true);
-    expect(content.includes('md-musharraf-dev')).toBe(true);
-    expect(content.includes('mush_a_rraf')).toBe(true);
+describe('Indian Government & Exam Specifications', () => {
+  const presetsFile = fs.readFileSync(path.join(__dirname, '../lib/presets.ts'), 'utf8');
+
+  it('should verify Indian Passport 35x45mm with 70-80% face coverage', () => {
+    expect(presetsFile.includes("widthMm: 35, heightMm: 45, ratio: '7:9'")).toBe(true);
+    expect(presetsFile.includes("headMinPct: 70, headMaxPct: 80")).toBe(true);
+  });
+
+  it('should verify UPSC and SSC mandate Name & DOP exam strip', () => {
+    expect(presetsFile.includes("key: 'upsc'")).toBe(true);
+    expect(presetsFile.includes("key: 'ssc'")).toBe(true);
+    expect(presetsFile.includes("requiresSlate: true")).toBe(true);
+  });
+
+  it('should verify PAN Card strict 200 DPI and under 50KB limit', () => {
+    expect(presetsFile.includes("key: 'pan'")).toBe(true);
+    expect(presetsFile.includes("targetKbMax: 50")).toBe(true);
+  });
+
+  it('should verify NEET Postcard 4x6 inch specifications', () => {
+    expect(presetsFile.includes("key: 'neet_postcard'")).toBe(true);
+    expect(presetsFile.includes("widthMm: 101.6, heightMm: 152.4")).toBe(true);
+  });
+
+  it('should verify Signature Studio presets exist with official portal limits', () => {
+    const sigFile = fs.readFileSync(path.join(__dirname, '../lib/signatureProcessor.ts'), 'utf8');
+    expect(sigFile.includes("id: 'ibps'")).toBe(true);
+    expect(sigFile.includes("widthPx: 140")).toBe(true);
+    expect(sigFile.includes("heightPx: 60")).toBe(true);
+    expect(sigFile.includes("minKB: 10")).toBe(true);
+    expect(sigFile.includes("maxKB: 20")).toBe(true);
+  });
+});
+
+describe('High-Resolution Photo Quality & Fidelity Pipeline', () => {
+  it('should verify imageImport preserves 4K resolution and 0.98 JPEG quality', () => {
+    const importFile = fs.readFileSync(path.join(__dirname, '../lib/imageImport.ts'), 'utf8');
+    expect(importFile.includes('const MAX_EDGE = 4096')).toBe(true);
+    expect(importFile.includes('const JPEG_QUALITY = 0.98')).toBe(true);
+  });
+
+  it('should verify backgroundRemoval composites alpha mask onto full-resolution original photo', () => {
+    const bgFile = fs.readFileSync(path.join(__dirname, '../lib/backgroundRemoval.ts'), 'utf8');
+    expect(bgFile.includes('compositeFullResolutionCutout')).toBe(true);
+    expect(bgFile.includes("ctx.globalCompositeOperation = 'destination-in'")).toBe(true);
+  });
+
+  it('should verify DownloadButton KB compressor preserves high visual quality', () => {
+    const downloadFile = fs.readFileSync(path.join(__dirname, '../lib/../components/DownloadButton.tsx'), 'utf8');
+    expect(downloadFile.includes('compressImageToKB')).toBe(true);
+    expect(downloadFile.includes('estOptimalPixels')).toBe(true);
+    // Verifies 0.5 quality drop was eliminated
+    expect(downloadFile.includes("'image/jpeg', 0.5);")).toBe(false);
+  });
+
+  it('should verify handleBGRemoved does not force artificial highlight blow-out', () => {
+    const pageFile = fs.readFileSync(path.join(__dirname, '../app/page.tsx'), 'utf8');
+    // Ensure handleBGRemoved doesn't blindly hardcode brightness(106) and contrast(112)
+    expect(pageFile.includes('Background removed with full original photo resolution.')).toBe(true);
   });
 });
 

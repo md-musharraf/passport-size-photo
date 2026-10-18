@@ -177,7 +177,7 @@ export default function BatchEditModal({
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-panel-app border border-border-app rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-scaleUp">
+      <div className="card-chai rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-scaleUp">
         {/* Header */}
         <div className="px-6 py-4 border-b border-border-app flex justify-between items-center bg-card-app/30">
           <div>
@@ -322,8 +322,8 @@ export default function BatchEditModal({
               {activeTab === 'crop' && (
                 <div className="space-y-4">
                   {clothingTemplate !== 'none' && (
-                    <div className="bg-accent-app/10 border border-accent-app/30 p-2.5 rounded-xl flex flex-col gap-2 mb-2">
-                      <span className="text-[10px] font-black text-accent-app uppercase tracking-wider">Drag Target Mode</span>
+                    <div className="card-chai p-2.5 rounded-xl flex flex-col gap-2 mb-2">
+                      <span className="text-xs font-semibold text-text-primary">Drag target mode</span>
                       <div className="grid grid-cols-2 gap-2">
                         <button
                           onClick={() => setActiveDragTarget('photo')}
@@ -398,8 +398,8 @@ export default function BatchEditModal({
                 <div className="space-y-4">
                   {/* Model Quality Selection */}
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest pl-0.5">
-                      AI Precision Quality
+                    <label className="text-xs font-medium text-neutral-400 pl-0.5">
+                      AI precision quality
                     </label>
                     <select
                       value={modelQuality}
@@ -667,15 +667,15 @@ export default function BatchEditModal({
             <div className="p-4 border-t border-border-app bg-card-app/30 flex justify-end gap-2.5 select-none">
               <button
                 onClick={onClose}
-                className="px-4 py-2 border border-border-app text-text-secondary hover:text-text-primary rounded-xl text-xs font-bold hover:bg-card-app/60 cursor-pointer transition-colors"
+                className="btn-asym-mirror px-4 py-2 border border-border text-neutral-400 hover:text-foreground text-xs font-medium cursor-pointer transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSave}
-                className="px-5 py-2 bg-accent-app hover:bg-accent-hover text-white rounded-xl text-xs font-extrabold flex items-center gap-1 cursor-pointer transition-colors shadow-md shadow-accent-app/10"
+                className="btn-asym px-5 py-2 bg-white text-black hover:bg-neutral-200 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors"
               >
-                <FiCheck className="w-4 h-4" /> Save Changes
+                <FiCheck className="w-4 h-4" /> Save changes
               </button>
             </div>
 

@@ -4,7 +4,7 @@
 //
 // We previously rendered flag emojis (🇺🇸, 🇮🇳, …). Those look fine on macOS/iOS
 // but Windows has no flag glyphs, so they degrade to plain letter pairs ("US",
-// "IN") in tiny boxes — which is exactly the "emoji looks broken" issue. These
+// "IN") in tiny boxes, which is exactly the "emoji looks broken" issue. These
 // crisp, dependency-free SVGs render identically on every platform.
 
 export type CountryCode = 'us' | 'in' | 'gb' | 'eu' | 'de' | 'ca' | 'au' | 'jp' | 'sg' | 'cn';
@@ -27,7 +27,7 @@ function starPoints(cx: number, cy: number, r: number): string {
 }
 
 const FLAGS: Record<CountryCode, React.ReactNode> = {
-  // United States — 13 stripes + blue canton with stars.
+  // United States: 13 stripes + blue canton with stars.
   us: (
     <>
       <rect width="60" height="40" fill="#fff" />
@@ -46,7 +46,7 @@ const FLAGS: Record<CountryCode, React.ReactNode> = {
       )}
     </>
   ),
-  // India — saffron / white / green + navy Ashoka chakra.
+  // India: saffron / white / green + navy Ashoka chakra.
   in: (
     <>
       <rect width="60" height="13.33" fill="#ff9933" />
@@ -70,7 +70,7 @@ const FLAGS: Record<CountryCode, React.ReactNode> = {
       })}
     </>
   ),
-  // United Kingdom — Union Jack.
+  // United Kingdom: Union Jack.
   gb: (
     <>
       <rect width="60" height="40" fill="#012169" />
@@ -82,7 +82,7 @@ const FLAGS: Record<CountryCode, React.ReactNode> = {
       <rect y="17" width="60" height="6" fill="#c8102e" />
     </>
   ),
-  // European Union — 12 gold stars on blue.
+  // European Union: 12 gold stars on blue.
   eu: (
     <>
       <rect width="60" height="40" fill="#003399" />
@@ -98,7 +98,7 @@ const FLAGS: Record<CountryCode, React.ReactNode> = {
       })}
     </>
   ),
-  // Germany — black / red / gold.
+  // Germany: black / red / gold.
   de: (
     <>
       <rect width="60" height="13.33" fill="#000" />
@@ -106,7 +106,7 @@ const FLAGS: Record<CountryCode, React.ReactNode> = {
       <rect y="26.67" width="60" height="13.33" fill="#ffce00" />
     </>
   ),
-  // Canada — red bands + red maple leaf.
+  // Canada: red bands + red maple leaf.
   ca: (
     <>
       <rect width="60" height="40" fill="#fff" />
@@ -118,7 +118,7 @@ const FLAGS: Record<CountryCode, React.ReactNode> = {
       />
     </>
   ),
-  // Australia — Union Jack canton + Commonwealth star + Southern Cross (simplified).
+  // Australia: Union Jack canton + Commonwealth star + Southern Cross (simplified).
   au: (
     <>
       <rect width="60" height="40" fill="#00008b" />
@@ -138,14 +138,14 @@ const FLAGS: Record<CountryCode, React.ReactNode> = {
       <polygon points={starPoints(50, 33, 1.5)} fill="#fff" />
     </>
   ),
-  // Japan — red disc on white.
+  // Japan: red disc on white.
   jp: (
     <>
       <rect width="60" height="40" fill="#fff" />
       <circle cx="30" cy="20" r="11" fill="#bc002d" />
     </>
   ),
-  // Singapore — red over white, crescent + five stars.
+  // Singapore: red over white, crescent + five stars.
   sg: (
     <>
       <rect width="60" height="20" fill="#ed2939" />
@@ -163,7 +163,7 @@ const FLAGS: Record<CountryCode, React.ReactNode> = {
       ))}
     </>
   ),
-  // China — red field, one large + four small gold stars.
+  // China: red field, one large + four small gold stars.
   cn: (
     <>
       <rect width="60" height="40" fill="#de2910" />

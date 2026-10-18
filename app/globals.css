@@ -1,86 +1,129 @@
 @import "tailwindcss";
 
-@theme {
-  --color-bg-app: var(--bg-app);
-  --color-panel-app: var(--panel-app);
-  --color-card-app: var(--card-app);
-  --color-accent-app: var(--accent-app);
-  --color-accent-hover: var(--accent-hover);
-  --color-success-app: var(--success-app);
-  --color-warning-app: var(--warning-app);
-  --color-danger-app: var(--danger-app);
-  --color-text-primary: var(--text-primary);
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: var(--font-sans), 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-display), 'Montserrat', ui-sans-serif, system-ui, sans-serif;
+  --font-brand: var(--font-brand), 'Onest', ui-sans-serif, system-ui, sans-serif;
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-highlight: var(--highlight);
+  --color-card-edge: var(--card-edge);
+  --color-card-edge-hover: var(--card-edge-hover);
+  --color-card-fill: var(--card-fill);
+
+  /* Legacy app aliases mapped to ChaiUI system */
+  --color-bg-app: var(--background);
+  --color-panel-app: var(--card);
+  --color-card-app: var(--card);
+  --color-accent-app: var(--foreground);
+  --color-accent-hover: var(--foreground);
+  --color-success-app: var(--success);
+  --color-warning-app: var(--warning);
+  --color-danger-app: var(--danger);
+  --color-text-primary: var(--foreground);
   --color-text-secondary: var(--text-secondary);
-  --color-border-app: var(--border-app);
+  --color-border-app: var(--card-edge);
 }
 
-/* --------------------------------------------------------------------------
-   Classic studio palette: quiet neutral surfaces, one traditional blue accent,
-   clear status colours. Light is the default; dark keeps the same hierarchy.
-   -------------------------------------------------------------------------- */
-:root,
-.light {
+:root {
   color-scheme: light;
-  --bg-app: #EEF0F3;
-  --panel-app: #F8F9FB;
-  --card-app: #FFFFFF;
-  --accent-app: #1F5FBF;
-  --accent-hover: #174C99;
-  --success-app: #15803D;
-  --warning-app: #B45309;
-  --danger-app: #B91C1C;
-  --text-primary: #1C2430;
-  --text-secondary: #5B6573;
-  --border-app: #D5DAE1;
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(0.985 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --border: rgb(120 53 15 / 0.15);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --brand: oklch(66.6% 0.179 58.318);
+  --text-secondary: oklch(0.45 0 0);
 
-  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
-  --shadow-md: 0 2px 8px -2px rgba(16, 24, 40, 0.10);
-  --shadow-lg: 0 12px 28px -8px rgba(16, 24, 40, 0.18);
-  --shadow-glow: 0 1px 2px rgba(16, 24, 40, 0.12);
-  --ring-accent: 0 0 0 3px rgba(31, 95, 191, 0.28);
+  --highlight: oklch(0.476 0.114 61.907); /* yellow-800 */
+  --card-edge: rgb(120 53 15 / 0.15); /* amber-900/15 */
+  --card-edge-hover: rgb(120 53 15 / 0.30);
+  --card-fill: rgb(255 255 255 / 0.85);
 
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  --success: #15803d;
+  --warning: #b45309;
+  --danger: #b91c1c;
 
-  --font-size-heading: 20px;
-  --font-size-section: 16px;
-  --font-size-button: 15px;
-  --font-size-label: 14px;
-  --font-size-input: 14px;
+  --bg-app: var(--background);
+  --panel-app: var(--card);
+  --card-app: var(--card);
+  --accent-app: #18181b;
+  --accent-hover: #000000;
+  --text-primary: var(--foreground);
+  --border-app: var(--card-edge);
+
+  /* ChaiUI strictly prohibits drop shadows */
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-glow: none;
+  --ring-accent: 0 0 0 2px rgb(120 53 15 / 0.25);
 }
 
 .dark {
   color-scheme: dark;
-  --bg-app: #121418;
-  --panel-app: #181B20;
-  --card-app: #1F2329;
-  --accent-app: #4C8DF0;
-  --accent-hover: #6FA3F3;
-  --success-app: #34A866;
-  --warning-app: #E0A030;
-  --danger-app: #EF5350;
-  --text-primary: #E6E8EB;
-  --text-secondary: #9AA3AF;
-  --border-app: #2E333B;
+  --radius: 0.625rem;
+  --background: oklch(0.145 0 0); /* #0a0a0a */
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.18 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --brand: oklch(75% 0.183 55.934);
+  --text-secondary: oklch(0.708 0 0);
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 12px 32px -6px rgba(0, 0, 0, 0.55);
-  --shadow-glow: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --ring-accent: 0 0 0 3px rgba(76, 141, 240, 0.35);
+  --highlight: oklch(0.954 0.038 75.164); /* orange-100 */
+  --card-edge: rgb(255 247 237 / 0.12); /* orange-50/12 */
+  --card-edge-hover: rgb(255 247 237 / 0.28);
+  --card-fill: rgb(0 0 0 / 0.28);
+
+  --success: #22c55e;
+  --warning: #eab308;
+  --danger: #ef4444;
+
+  --bg-app: var(--background);
+  --panel-app: oklch(0.165 0 0);
+  --card-app: oklch(0.185 0 0);
+  --accent-app: #ffffff;
+  --accent-hover: #e4e4e7;
+  --text-primary: var(--foreground);
+  --border-app: var(--card-edge);
+
+  /* ChaiUI strictly prohibits drop shadows */
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-glow: none;
+  --ring-accent: 0 0 0 2px rgb(255 247 237 / 0.25);
 }
 
-/* Base Body Styles. 100dvh tracks the real visible height on mobile browsers
-   (100vh hides content under their toolbars). */
+/* Base Body Styles */
 html,
 body {
   height: 100%;
 }
 body {
-  background-color: var(--bg-app);
-  color: var(--text-primary);
-  font-family: var(--font-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), 'Manrope', system-ui, sans-serif;
   font-size: 14px;
   overflow: hidden;
   height: 100vh;
@@ -92,51 +135,78 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* Canvases handle their own drag / pinch gestures. */
+/* Touch handling */
 .touch-none-canvas {
   touch-action: none;
   overscroll-behavior: contain;
 }
 
-/* Comfortable hit targets on touch screens. */
 @media (pointer: coarse) {
-  .studio-btn { min-height: 48px; }
+  .studio-btn { min-height: 44px; }
 }
 
-/* Global Typography Classes based on specifications */
-.app-heading {
-  font-size: var(--font-size-heading) !important;
-  font-weight: 600 !important;
-  letter-spacing: -0.015em;
-  color: var(--text-primary);
+/* ==========================================================================
+   ChaiUI Utilities
+   ========================================================================== */
+
+/* The highlight phrase: one per paragraph */
+.highlight {
+  font-family: var(--font-display), 'Montserrat', sans-serif;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  text-transform: capitalize;
+  color: var(--highlight);
 }
 
-.app-section-title {
-  font-size: var(--font-size-section) !important;
-  font-weight: 600 !important;
-  color: var(--text-primary);
+/* The warm hairline card: no shadow, faint fill, slight blur */
+.card-chai {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--card-edge);
+  background: var(--card-fill);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: border-color 300ms ease, opacity 300ms ease;
+}
+.card-chai:hover {
+  border-color: var(--card-edge-hover);
 }
 
-.app-button-text {
-  font-size: var(--font-size-button) !important;
-  font-weight: 600 !important;
+/* Asymmetric corners: solid takes top-right and bottom-left */
+.btn-asym {
+  border-radius: 0 var(--radius-md) 0 var(--radius-md) !important;
 }
 
-.app-label {
-  font-size: var(--font-size-label) !important;
-  font-weight: 500 !important;
-  color: var(--text-secondary);
+/* Outline beside solid takes top-left and bottom-right */
+.btn-asym-mirror {
+  border-radius: var(--radius-md) 0 var(--radius-md) 0 !important;
 }
 
-.app-input {
-  font-size: var(--font-size-input) !important;
-  font-weight: 500 !important;
-  background-color: var(--card-app);
-  border: 1px solid var(--border-app);
-  color: var(--text-primary);
+/* Background ambient glow */
+.chai-backdrop {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 100%;
+  max-width: 1440px;
+  height: 600px;
+  transform: translateX(-50%);
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 0%, rgb(255 247 237 / 0.08), transparent 70%);
+  mask-image: linear-gradient(to bottom, #000 40%, transparent 100%);
+}
+:root:not(.dark) .chai-backdrop {
+  background: radial-gradient(circle at 50% 0%, rgb(180 83 9 / 0.08), transparent 70%);
 }
 
-/* Custom layout container helper to ensure no page scrolling */
+/* Animated border glint */
+@keyframes chai-spin {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+/* App viewports and layout helpers */
 .app-viewport {
   height: 100dvh;
   width: 100%;
@@ -145,21 +215,19 @@ body {
   flex-direction: column;
 }
 
-/* Button default design system */
+/* Global button styling aligned with ChaiUI specifications */
 .studio-btn {
-  min-height: 42px;
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-button);
-  font-weight: 600;
+  min-height: 38px;
+  font-size: 14px;
+  font-weight: 500;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  padding: 0.5rem 1.15rem;
+  padding: 0.45rem 1rem;
   white-space: nowrap;
-  transition: background-color 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: all 0.2s ease;
   cursor: pointer;
-  border: 1px solid transparent;
   user-select: none;
 }
 
@@ -172,53 +240,53 @@ body {
   box-shadow: var(--ring-accent);
 }
 
+/* Primary solid action: white on dark, dark on light, asymmetric corners */
 .studio-btn-primary {
   background-color: var(--accent-app);
-  color: #FFFFFF;
-  box-shadow: var(--shadow-glow);
+  color: var(--background);
+  border: 1px solid transparent;
+  border-radius: 0 var(--radius-md) 0 var(--radius-md);
+  font-weight: 500;
 }
-
 .studio-btn-primary:hover:not(:disabled) {
   background-color: var(--accent-hover);
 }
 
+/* Secondary outline action: mirrored corners, subtle border */
 .studio-btn-secondary {
-  background-color: var(--card-app);
-  color: var(--text-primary);
-  border-color: var(--border-app);
+  background-color: transparent;
+  color: var(--foreground);
+  border: 1px solid var(--border-app);
+  border-radius: var(--radius-md) 0 var(--radius-md) 0;
 }
-
 .studio-btn-secondary:hover:not(:disabled) {
-  background-color: var(--panel-app);
-  border-color: var(--text-secondary);
+  background-color: color-mix(in srgb, var(--foreground) 6%, transparent);
+  border-color: var(--card-edge-hover);
 }
 
 .studio-btn-ghost {
   background-color: transparent;
   color: var(--text-secondary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
 }
-
 .studio-btn-ghost:hover:not(:disabled) {
-  background-color: color-mix(in srgb, var(--text-primary) 7%, transparent);
-  color: var(--text-primary);
+  background-color: color-mix(in srgb, var(--foreground) 7%, transparent);
+  color: var(--foreground);
 }
 
 .studio-btn-success {
-  background-color: var(--success-app);
-  color: #FFFFFF;
-}
-
-.studio-btn-success:hover:not(:disabled) {
-  background-color: color-mix(in srgb, var(--success-app) 85%, black);
+  background-color: transparent;
+  color: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 35%, transparent);
+  border-radius: var(--radius-md);
 }
 
 .studio-btn-danger {
-  background-color: var(--danger-app);
-  color: #FFFFFF;
-}
-
-.studio-btn-danger:hover:not(:disabled) {
-  background-color: color-mix(in srgb, var(--danger-app) 85%, black);
+  background-color: transparent;
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: var(--radius-md);
 }
 
 .studio-btn:disabled {
@@ -226,18 +294,12 @@ body {
   cursor: not-allowed;
 }
 
-/* Accordion design matches panels */
-.studio-accordion-header {
-  background-color: var(--panel-app);
-  border-bottom: 1px solid var(--border-app);
-}
-
-/* Custom range inputs - Styled beautifully with Amber accent */
+/* Custom range inputs */
 input[type='range'] {
   -webkit-appearance: none;
   appearance: none;
   background: var(--border-app);
-  height: 6px;
+  height: 4px;
   border-radius: 9999px;
   outline: none;
 }
@@ -245,186 +307,98 @@ input[type='range'] {
 input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: var(--accent-app);
-  border: 2px solid var(--card-app);
-  box-shadow: var(--shadow-sm);
+  background: var(--foreground);
+  border: 2px solid var(--card);
   cursor: pointer;
-  transition: transform 0.1s ease-in-out, background-color 0.1s ease-in-out;
+  transition: transform 0.1s ease-in-out;
 }
 
 input[type='range']::-webkit-slider-thumb:hover {
   transform: scale(1.15);
-  background: var(--accent-hover);
-}
-
-@media (pointer: coarse) {
-  input[type='range']::-webkit-slider-thumb { width: 26px; height: 26px; }
-  input[type='range']::-moz-range-thumb { width: 24px; height: 24px; }
 }
 
 input[type='range']::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: var(--accent-app);
-  border: 2px solid var(--card-app);
+  background: var(--foreground);
+  border: 2px solid var(--card);
   cursor: pointer;
-  transition: transform 0.1s ease-in-out, background-color 0.1s ease-in-out;
 }
 
-input[type='range']::-moz-range-thumb:hover {
-  transform: scale(1.15);
-  background: var(--accent-hover);
-}
-
-/* Hide scrollbars but keep functionality */
+/* Scrollbars */
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
 .no-scrollbar {
-  -ms-overflow-style: none;  /* IE and Edge */
-  scrollbar-width: none;  /* Firefox */
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
-/* Custom premium scrollbar for panels */
 .panel-scrollbar::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 .panel-scrollbar::-webkit-scrollbar-track {
-  background: var(--panel-app);
+  background: transparent;
 }
 .panel-scrollbar::-webkit-scrollbar-thumb {
   background: var(--border-app);
-  border-radius: 4px;
+  border-radius: 3px;
 }
 .panel-scrollbar::-webkit-scrollbar-thumb:hover {
   background: var(--text-secondary);
 }
 
-/* Biometric compliance pulsing guide overlay */
-/* Kept static: a constantly pulsing overlay is distracting while aligning. */
-.biometric-guide-pulse {
-  opacity: 0.85;
-  transition: opacity 0.2s ease;
-}
-
-/* Shimmer buttons for AI status */
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-.ai-shimmer {
-  background: linear-gradient(90deg,
-    color-mix(in srgb, var(--accent-app) 12%, transparent) 25%,
-    color-mix(in srgb, var(--accent-app) 30%, transparent) 50%,
-    color-mix(in srgb, var(--accent-app) 12%, transparent) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 2s infinite linear;
-}
-
-/* ==========================================================================
-   Motion system — several of these class names were already used throughout
-   the app but had no keyframes defined, so the intended entrance animations
-   silently did nothing. Defining them here turns them on everywhere at once.
-   ========================================================================== */
+/* Animations */
 @keyframes fadeIn {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
-@keyframes scaleUp {
-  from { opacity: 0; transform: scale(0.96); }
-  to   { opacity: 1; transform: scale(1); }
-}
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.animate-fadeIn { animation: fadeIn 0.35s ease-out both; }
-.animate-scaleUp { animation: scaleUp 0.28s cubic-bezier(0.22, 1, 0.36, 1) both; }
-.animate-slideUp { animation: slideUp 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
-/* Fallback for the tailwindcss-animate style `animate-in` used in a few places. */
-.animate-in { animation: scaleUp 0.28s cubic-bezier(0.22, 1, 0.36, 1) both; }
-/* Gentle cross-fade when switching workflow steps. */
-.screen-enter { animation: slideUp 0.25s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.animate-fadeIn { animation: fadeIn 0.3s ease-out both; }
+.animate-slideUp { animation: slideUp 0.25s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.screen-enter { animation: slideUp 0.22s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-fadeIn, .animate-scaleUp, .animate-slideUp, .animate-in,
-  .ai-shimmer, .biometric-guide-pulse, .screen-enter {
+  .animate-fadeIn, .animate-slideUp, .screen-enter {
     animation: none !important;
   }
 }
 
-/* ==========================================================================
-   Surfaces & interaction utilities — shared elevation language.
-   ========================================================================== */
-/* Solid instead of backdrop-blurred: blur is expensive on low-end GPUs and
-   repaints on every canvas drag underneath. */
-.glass-card {
-  background: var(--card-app);
-  border: 1px solid var(--border-app);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
-}
-
-.elevate-sm { box-shadow: var(--shadow-sm); }
-.elevate-md { box-shadow: var(--shadow-md); }
-.elevate-lg { box-shadow: var(--shadow-lg); }
-
-/* Subtle lift on hover for interactive cards. */
-.hover-lift {
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
-}
-.hover-lift:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-lg);
-  border-color: color-mix(in srgb, var(--accent-app) 45%, var(--border-app));
-}
-
-/* Consistent, accessible keyboard focus for all interactive controls. */
+/* Accessibility focus styles */
 button:focus-visible,
 a:focus-visible,
 select:focus-visible,
 [role="button"]:focus-visible {
   outline: none;
   box-shadow: var(--ring-accent);
-  border-radius: var(--radius-sm);
 }
 
-/* Inputs get a clean accent ring on focus instead of the default browser glow. */
 input:focus-visible,
 textarea:focus-visible {
   outline: none;
-  border-color: var(--accent-app);
+  border-color: var(--card-edge-hover);
   box-shadow: var(--ring-accent);
 }
 
-/* Filled track for range sliders (progress feel) in supporting browsers. */
-input[type='range'] {
-  transition: background 0.1s ease;
-}
-input[type='range']:hover {
-  background: color-mix(in srgb, var(--border-app) 70%, var(--accent-app));
+/* Remove shadows globally */
+.elevate-sm,
+.elevate-md,
+.elevate-lg {
+  box-shadow: none !important;
 }
 
-/* ==========================================================================
-   Classic type layer. The deeper panels (print settings, batch tools, modals)
-   were written with heavy, all-caps, wide-tracked micro-labels. Inside the app
-   shell those are softened to the same calm sentence-style voice as the rest
-   of the UI, and the tiniest text is nudged up to stay legible.
-   (Unlayered rules win over Tailwind's utilities layer.)
-   ========================================================================== */
+/* Typography normalizing */
 .classic-ui .uppercase { text-transform: none; }
 .classic-ui .font-black,
 .classic-ui .font-extrabold { font-weight: 600; }
 .classic-ui .tracking-widest,
 .classic-ui .tracking-wider,
-.classic-ui .tracking-wide { letter-spacing: 0.005em; }
-.classic-ui .text-\[9px\],
-.classic-ui .text-\[10px\] { font-size: 11px; }
-.classic-ui .rounded-2xl,
-.classic-ui .rounded-3xl { border-radius: var(--radius-lg); }
-.classic-ui .animate-pulse { animation: none; }
+.classic-ui .tracking-wide { letter-spacing: -0.01em; }

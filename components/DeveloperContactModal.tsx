@@ -72,28 +72,27 @@ export default function DeveloperContactModal({ isOpen, onClose }: DeveloperCont
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-[10000] flex items-center justify-center p-4 animate-fadeIn">
       {/* Modal Card */}
-      <div className="w-full max-w-lg bg-panel-app border border-border-app rounded-3xl p-6 md:p-8 shadow-2xl relative text-text-primary font-sans overflow-hidden">
-        {/* Decorative Gradients */}
-        <div className="absolute top-0 left-0 w-32 h-32 rounded-full bg-accent-app/10 blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 right-0 w-32 h-32 rounded-full bg-indigo-500/10 blur-3xl pointer-events-none" />
+      <div className="w-full max-w-lg card-chai rounded-2xl p-6 md:p-8 relative text-foreground font-sans overflow-hidden">
+        {/* Decorative subtle top hairline */}
+        <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-orange-500/20 to-transparent pointer-events-none" />
 
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-5 right-5 w-8 h-8 rounded-lg border border-border-app bg-card-app/50 hover:bg-card-app text-text-secondary hover:text-text-primary transition-all flex items-center justify-center cursor-pointer z-10"
+          className="absolute top-5 right-5 w-8 h-8 rounded-lg border border-border bg-card-chai text-neutral-400 hover:text-foreground transition-colors flex items-center justify-center cursor-pointer z-10"
         >
           <FiX className="w-4 h-4" />
         </button>
 
         {/* Header */}
         <div className="text-center space-y-2 mb-6 select-text">
-          <div className="mx-auto w-12 h-12 rounded-2xl bg-gradient-to-tr from-accent-app to-orange-500 flex items-center justify-center shadow-lg shadow-accent-app/10">
-            <FiPhone className="w-5 h-5 text-white" />
+          <div className="mx-auto w-12 h-12 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-foreground">
+            <FiPhone className="w-5 h-5 text-foreground" />
           </div>
-          <h2 className="text-[22px] font-extrabold tracking-tight mt-4 text-text-primary">
-            Developer Contact & Support
+          <h2 className="text-xl sm:text-2xl font-semibold tracking-tight mt-4 text-foreground">
+            Developer contact & support
           </h2>
-          <p className="text-[13px] text-text-secondary max-w-sm mx-auto mt-2">
+          <p className="text-[13px] text-neutral-400 max-w-sm mx-auto mt-2">
             Need help, want to report a bug, request custom features, or inquire about license keys? Contact the developer:
           </p>
         </div>
@@ -110,10 +109,10 @@ export default function DeveloperContactModal({ isOpen, onClose }: DeveloperCont
                   {contact.icon}
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[11px] font-black text-text-secondary uppercase tracking-widest leading-none mb-1">
+                  <p className="text-xs font-medium text-neutral-400 leading-none mb-1">
                     {contact.name}
                   </p>
-                  <p className="text-[14px] font-bold text-text-primary truncate">
+                  <p className="text-[14px] font-semibold text-foreground truncate">
                     {contact.displayValue}
                   </p>
                 </div>
@@ -124,7 +123,7 @@ export default function DeveloperContactModal({ isOpen, onClose }: DeveloperCont
                 {/* Copy Button */}
                 <button
                   onClick={() => handleCopy(contact.value, contact.id)}
-                  className="w-8 h-8 rounded-lg bg-card-app/50 hover:bg-card-app border border-border-app flex items-center justify-center text-text-secondary hover:text-text-primary transition-all cursor-pointer relative"
+                  className="w-8 h-8 rounded-lg bg-card-chai border border-border flex items-center justify-center text-neutral-400 hover:text-foreground transition-colors cursor-pointer relative"
                   title={`Copy ${contact.name}`}
                 >
                   {copiedId === contact.id ? (
@@ -133,7 +132,7 @@ export default function DeveloperContactModal({ isOpen, onClose }: DeveloperCont
                     <FiCopy className="w-4 h-4" />
                   )}
                   {copiedId === contact.id && (
-                    <span className="absolute -top-8 bg-neutral-900 text-white text-[10px] px-1.5 py-0.5 rounded shadow border border-neutral-800 font-bold whitespace-nowrap animate-bounce">
+                    <span className="absolute -top-8 bg-neutral-900 text-white text-[10px] px-1.5 py-0.5 rounded border border-neutral-800 font-medium whitespace-nowrap animate-bounce">
                       Copied!
                     </span>
                   )}
@@ -144,7 +143,7 @@ export default function DeveloperContactModal({ isOpen, onClose }: DeveloperCont
                   href={contact.link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="h-8 px-3 rounded-lg bg-accent-app/10 hover:bg-accent-app border border-accent-app/20 text-accent-app hover:text-white flex items-center justify-center gap-1 text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer"
+                  className="h-8 px-3 rounded-lg bg-white/10 hover:bg-white hover:text-black border border-white/20 text-foreground flex items-center justify-center gap-1.5 text-xs font-medium transition-colors cursor-pointer"
                 >
                   <span>{contact.actionLabel}</span>
                   <FiExternalLink className="w-3.5 h-3.5" />

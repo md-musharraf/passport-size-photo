@@ -191,12 +191,26 @@ function detect(lm: FaceLandmarker, canvas: HTMLCanvasElement) {
   return quietly(() => lm.detect(canvas));
 }
 
+const MAX_FACE_CACHE = 8;
+const faceAnalysisCache = new Map<string, FaceAnalysis>();
+
+function getFaceCacheKey(src: string): string {
+  const len = src.length;
+  if (len < 300) return src;
+  return `${len}_${src.slice(0, 80)}_${src.slice(Math.floor(len / 2), Math.floor(len / 2) + 80)}_${src.slice(-80)}`;
+}
+
 /**
  * Detect the main face in `src` and measure everything the passport tools need.
  * Returns null when no face is found. Coordinates are in the source image's
  * natural pixel size.
  */
 export async function analyzeFace(src: string): Promise<FaceAnalysis | null> {
+  const cacheKey = getFaceCacheKey(src);
+  if (faceAnalysisCache.has(cacheKey)) {
+    return faceAnalysisCache.get(cacheKey)!;
+  }
+
   const img = await loadImage(src);
   const canvas = toCanvas(img);
   const W = img.naturalWidth;
@@ -346,7 +360,7 @@ export async function analyzeFace(src: string): Promise<FaceAnalysis | null> {
   const smile = (blendScore(shapes, 'mouthSmileLeft') + blendScore(shapes, 'mouthSmileRight')) / 2;
   const jawOpen = blendScore(shapes, 'jawOpen');
 
-  return {
+  const analysis: FaceAnalysis = {
     imgW: W,
     imgH: H,
     leftEye,
@@ -368,4 +382,12 @@ export async function analyzeFace(src: string): Promise<FaceAnalysis | null> {
     crownFromMask,
     backend,
   };
+
+  if (faceAnalysisCache.size >= MAX_FACE_CACHE) {
+    const firstKey = faceAnalysisCache.keys().next().value;
+    if (firstKey) faceAnalysisCache.delete(firstKey);
+  }
+  faceAnalysisCache.set(cacheKey, analysis);
+
+  return analysis;
 }

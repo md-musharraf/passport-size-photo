@@ -9,8 +9,8 @@
 // Decoding through createImageBitmap / <img> also applies the EXIF
 // orientation, so sideways phone photos arrive upright.
 
-const MAX_EDGE = 2400;
-const JPEG_QUALITY = 0.92;
+const MAX_EDGE = 4096;
+const JPEG_QUALITY = 0.98;
 
 function readAsDataUrl(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
