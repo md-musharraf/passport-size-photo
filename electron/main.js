@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, protocol, net, nativeTheme } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, net, nativeTheme, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -115,11 +115,18 @@ async function checkLicense({ remote = true } = {}) {
 }
 
 // Background updates from GitHub Releases (electron-updater): downloads quietly,
-// shows an OS notification, installs on next quit. Packaged builds only.
+// installs on next quit. Packaged builds only. One OS notification per version:
+// checkForUpdatesAndNotify re-announced the same cached update every 6 h.
 function startAutoUpdates() {
   if (!app.isPackaged) return;
   const { autoUpdater } = require('electron-updater');
-  const check = () => autoUpdater.checkForUpdatesAndNotify().catch((e) => console.warn('[updater]', e.message));
+  let notifiedVersion;
+  autoUpdater.on('update-downloaded', ({ version }) => {
+    if (version === notifiedVersion) return;
+    notifiedVersion = version;
+    new Notification({ title: 'Update ready', body: `Version ${version} will install when you close the app.` }).show();
+  });
+  const check = () => autoUpdater.checkForUpdates().catch((e) => console.warn('[updater]', e.message));
   check();
   setInterval(check, 6 * 60 * 60 * 1000);
 }

@@ -21,6 +21,7 @@ import {
 } from '@/lib/signatureProcessor';
 import { importImageFile } from '@/lib/imageImport';
 import { toast } from '@/lib/toast';
+import { logActivity } from '@/lib/activity';
 
 interface SignatureModalProps {
   isOpen: boolean;
@@ -102,7 +103,6 @@ export default function SignatureModal({ isOpen, onClose }: SignatureModalProps)
     try {
       const dataUrl = await importImageFile(file);
       setRawImage(dataUrl);
-      toast('Signature loaded successfully.', 'success');
     } catch {
       toast('Failed to open signature file.', 'error');
     }
@@ -122,6 +122,7 @@ export default function SignatureModal({ isOpen, onClose }: SignatureModalProps)
     link.download = `signature-${activePreset.id}-${activePreset.widthPx}x${activePreset.heightPx}-${calculatedKB}kb.${format}`;
     link.href = downloadUrl;
     link.click();
+    logActivity('signature');
     toast(`Downloaded ${format.toUpperCase()} (${calculatedKB} KB)`, 'success');
   };
 

@@ -23,7 +23,8 @@ export default function Toaster() {
   useEffect(
     () =>
       subscribeToasts((t) => {
-        setItems((prev) => [...prev.slice(-2), t]);
+        // The same message twice at once is noise: show it once.
+        setItems((prev) => (prev.some((x) => x.text === t.text) ? prev : [...prev.slice(-2), t]));
         setTimeout(() => setItems((prev) => prev.filter((x) => x.id !== t.id)), t.kind === 'error' ? 7000 : 4000);
       }),
     [],

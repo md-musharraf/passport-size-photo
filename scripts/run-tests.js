@@ -337,7 +337,8 @@ describe('High-Resolution Photo Quality & Fidelity Pipeline', () => {
   it('should verify handleBGRemoved does not force artificial highlight blow-out', () => {
     const pageFile = fs.readFileSync(path.join(__dirname, '../app/page.tsx'), 'utf8');
     // Ensure handleBGRemoved doesn't blindly hardcode brightness(106) and contrast(112)
-    expect(pageFile.includes('Background removed with full original photo resolution.')).toBe(true);
+    const body = pageFile.split('const handleBGRemoved')[1].split('\n  };')[0];
+    expect(/setBrightness\(|setContrast\(/.test(body)).toBe(false);
   });
 });
 

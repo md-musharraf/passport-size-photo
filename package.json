@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node scripts/run-tests.js && node --no-warnings scripts/test-face-align.mjs",
+    "test": "node scripts/run-tests.js && node --no-warnings scripts/test-face-align.mjs && node --no-warnings scripts/test-activity.mjs",
     "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && electron .\"",
     "electron:build": "node scripts/download-models.js && node scripts/download-bg-models.js && npm run build && electron-builder",
     "dist": "npm run electron:build",

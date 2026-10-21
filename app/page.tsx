@@ -10,7 +10,9 @@ import { onIdle, isConstrainedDevice } from "@/lib/device";
 import { getPreset } from "@/lib/presets";
 import { importImageFile } from "@/lib/imageImport";
 import { toast } from "@/lib/toast";
+import { logActivity, trackScreenTime } from "@/lib/activity";
 import {
+  FiActivity,
   FiCamera,
   FiHelpCircle,
   FiSave,
@@ -59,6 +61,7 @@ const BGRemover = dynamic(loadBGRemover, { ssr: false });
 const BatchWorkspace = dynamic(() => import("@/components/BatchWorkspace"), { ssr: false, loading: ScreenLoading });
 const DeveloperContactModal = dynamic(() => import("@/components/DeveloperContactModal"), { ssr: false });
 const SignatureModal = dynamic(() => import("@/components/SignatureModal"), { ssr: false });
+const ActivityModal = dynamic(() => import("@/components/ActivityModal"), { ssr: false });
 
 let editorPrefetched = false;
 function prefetchEditor() {
@@ -198,6 +201,7 @@ export default function Home() {
   const [theme, setTheme] = useState<"dark" | "light" | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [showSignatureModal, setShowSignatureModal] = useState(false);
+  const [showActivityModal, setShowActivityModal] = useState(false);
 
   // Session auto-save / crash recovery
   const [recoverableSession, setRecoverableSession] = useState<any | null>(null);
@@ -325,6 +329,7 @@ export default function Home() {
   }, [isMultiPersonMode]);
 
   const handleMultipleImagesUpload = (imagesData: string[]) => {
+    logActivity("photo", imagesData.length);
     setIsMultiPersonMode(true);
     const newItems = imagesData.map((dataUrl, idx) => ({
       id: Math.random().toString(36).substring(7),
@@ -365,6 +370,8 @@ export default function Home() {
   useEffect(() => {
     setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
   }, []);
+
+  useEffect(() => trackScreenTime(), []);
 
   useEffect(() => {
     if (!theme) return;
@@ -474,6 +481,7 @@ export default function Home() {
   };
 
   const handleImageUpload = (imageData: string) => {
+    logActivity("photo");
     setOriginalImage(imageData);
     setProcessedImage(null);
     setBrightness(100);
@@ -659,7 +667,8 @@ export default function Home() {
     const defaultBgColor = getPreset(preset).bgColor;
     setBgColor(defaultBgColor);
 
-    toast("Background removed with full original photo resolution.", "success");
+    // No "done" toast: the new background is visible right away.
+    logActivity("bg");
     pushToHistory(
       buildSnapshot({
         processedImage: processed,
@@ -824,7 +833,6 @@ export default function Home() {
       try {
         const result = await removeBackground(originalImage, "auto");
         handleBGRemoved(result);
-        toast("Background removed.", "success");
       } catch (e: any) {
         toast(e?.message || "Background removal failed. Please try again.", "error");
       } finally {
@@ -1121,6 +1129,9 @@ export default function Home() {
           <IconButton title="Save project (Ctrl+S)" onClick={handleSaveProject} disabled={!originalImage}>
             <FiSave className="w-[18px] h-[18px]" />
           </IconButton>
+          <IconButton title="Your activity" onClick={() => setShowActivityModal(true)}>
+            <FiActivity className="w-[18px] h-[18px]" />
+          </IconButton>
           <IconButton title="Help & support" onClick={() => setShowHelpModal(true)}>
             <FiHelpCircle className="w-[18px] h-[18px]" />
           </IconButton>
@@ -1264,7 +1275,10 @@ export default function Home() {
                 onSpacingChange={setSpacing}
                 margin={margin}
                 onMarginChange={setMargin}
-                onExportSuccess={() => setActiveScreen("success")}
+                onExportSuccess={() => {
+                  logActivity("export");
+                  setActiveScreen("success");
+                }}
               />
             </div>
           ) : (
@@ -1426,6 +1440,7 @@ export default function Home() {
                     onCustomGridRowsChange={setCustomGridRows}
                     onSaveProject={handleSaveProject}
                     onExportSuccess={(fileData: any) => {
+                      logActivity("export");
                       setActiveScreen("success");
                     }}
                     // Multi-Person Mode
@@ -1518,6 +1533,7 @@ export default function Home() {
 
       {showHelpModal && <DeveloperContactModal isOpen onClose={() => setShowHelpModal(false)} />}
       {showSignatureModal && <SignatureModal isOpen onClose={() => setShowSignatureModal(false)} />}
+      {showActivityModal && <ActivityModal onClose={() => setShowActivityModal(false)} />}
     </main>
   );
 }
