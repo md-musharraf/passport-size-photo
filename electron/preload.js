@@ -1,16 +1,11 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Deliberately small: the renderer can ask for the licence state and submit a
+// key/trial, but can no longer wipe keys, reset the offline window or repoint
+// the licence server (main.js talks to the dashboard itself).
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
-  getMachineId: () => ipcRenderer.invoke('get-machine-id'),
-  licenseCheck: () => ipcRenderer.invoke('license-check'),
+  licenseCheck: (opts) => ipcRenderer.invoke('license-check', opts),
   licenseActivate: (key) => ipcRenderer.invoke('license-activate', key),
   licenseRequestTrial: () => ipcRenderer.invoke('license-request-trial'),
-  licenseWipe: () => ipcRenderer.invoke('license-wipe'),
-  getDashboardUrl: () => ipcRenderer.invoke('get-dashboard-url'),
-  saveDashboardUrl: (url) => ipcRenderer.invoke('save-dashboard-url', url),
-  isDashboardConfigured: () => ipcRenderer.invoke('is-dashboard-configured'),
-  recordSync: () => ipcRenderer.invoke('record-sync'),
 });
-
-
