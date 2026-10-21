@@ -188,7 +188,7 @@ function IconButton({
 }
 
 export default function Home() {
-  const { licenseState, isWebDemo, connection, openLicenseSettings } = useLicense();
+  const { licenseState, isWebDemo, connection, checkStatus } = useLicense();
   const [activeScreen, setActiveScreen] = useState<ScreenState>("welcome");
   const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [processedImage, setProcessedImage] = useState<string | null>(null);
@@ -1086,26 +1086,24 @@ export default function Home() {
           ) : (
             <button
               type="button"
-              onClick={openLicenseSettings}
+              onClick={checkStatus}
               className="hidden xl:inline-flex items-center gap-1.5 text-[11px] text-text-secondary hover:text-text-primary border border-border-app rounded-md px-2 py-0.5 mr-1 cursor-pointer"
-              title="Subscription dashboard connection"
+              title="Licence sync with the admin dashboard. Click to sync now."
             >
               <span
                 className={`w-1.5 h-1.5 rounded-full ${
                   connection.status === "connected"
                     ? "bg-success-app"
-                    : connection.status === "unconfigured" || connection.status === "checking"
+                    : connection.status === "checking"
                       ? "bg-warning-app"
                       : "bg-danger-app"
                 }`}
               />
               {connection.status === "connected"
                 ? `Synced${connection.lastSyncTime ? ` · ${connection.lastSyncTime}` : ""}`
-                : connection.status === "unconfigured"
-                  ? "Dashboard not set"
-                  : connection.status === "checking"
-                    ? "Checking…"
-                    : "Offline"}
+                : connection.status === "checking"
+                  ? "Checking…"
+                  : "Offline"}
             </button>
           )}
           <button

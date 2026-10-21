@@ -1,50 +1,25 @@
+// Offline licence minting for the admin. Normally the dashboard issues keys;
+// this is the fallback. Needs the Ed25519 private key (same value as the
+// dashboard's LICENSE_PRIVATE_KEY) — it is never shipped with the app.
+//
+//   LICENSE_PRIVATE_KEY=... node scripts/generate-license.js <Machine_ID> <YYYY-MM-DD>
+//   node scripts/generate-license.js --keypair     # create a NEW keypair (invalidates all keys!)
 const crypto = require('crypto');
+const { signKey } = require('../electron/license');
 
-// The shared secret salt must match the one in electron/main.js
-const SALT = process.env.LICENSE_SECRET_SALT || 'Musharraf_709121SaltKey';
-const KEY = crypto.createHash('sha256').update(SALT).digest();
+const [machineId, expiry] = process.argv.slice(2);
 
-/**
- * Generate a license key for a specific Machine ID and Expiration Date.
- * @param {string} machineId The hardware GUID shown on the client's screen
- * @param {string} expiryDate Expiration date in YYYY-MM-DD format
- * @returns {string} The cryptographically signed license key
- */
-function generateLicenseKey(machineId, expiryDate) {
-  const cleanMachineId = machineId.trim().toLowerCase();
-  const payload = `${cleanMachineId}|${expiryDate}`;
-  
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', KEY, iv);
-  
-  let encrypted = cipher.update(payload, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  
-  // Combine IV hex (32 characters) + Ciphertext hex
-  const licenseKey = iv.toString('hex') + encrypted;
-  return licenseKey.toLowerCase();
+if (machineId === '--keypair') {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+  console.log('LICENSE_PRIVATE_KEY=' + privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'));
+  console.log('Public key (paste into electron/license.js): ' + publicKey.export({ format: 'der', type: 'spki' }).toString('base64'));
+  process.exit(0);
 }
 
-// Example usage: node scripts/generate-license.js "MACHINE-GUID-HERE" "2027-12-31"
-const args = process.argv.slice(2);
-if (args.length < 2) {
-  console.log('\nUsage: node scripts/generate-license.js <Machine_ID> <Expiry_Date_YYYY-MM-DD>');
-  console.log('Example: node scripts/generate-license.js "52a514d2-fb9f-43b3-a123-ab3d5f308a10" "2027-12-31"\n');
+if (!machineId || !expiry || !Number.isFinite(Date.parse(expiry)) || !process.env.LICENSE_PRIVATE_KEY) {
+  console.log('\nUsage: LICENSE_PRIVATE_KEY=<base64> node scripts/generate-license.js <Machine_ID> <Expiry_YYYY-MM-DD>\n');
   process.exit(1);
 }
 
-const machineId = args[0];
-const expiryDate = args[1];
-
-try {
-  const key = generateLicenseKey(machineId, expiryDate);
-  console.log('\n--------------------------------------------------');
-  console.log('License Key Generated Successfully!');
-  console.log('--------------------------------------------------');
-  console.log(`Machine ID:  ${machineId}`);
-  console.log(`Expiry Date: ${expiryDate}`);
-  console.log(`License Key: ${key}`);
-  console.log('--------------------------------------------------\n');
-} catch (e) {
-  console.error('Failed to generate license key:', e);
-}
+const expiryDate = new Date(expiry).toISOString();
+console.log(`\nMachine ID:  ${machineId}\nExpiry Date: ${expiryDate}\nLicense Key: ${signKey(machineId, expiryDate, process.env.LICENSE_PRIVATE_KEY)}\n`);

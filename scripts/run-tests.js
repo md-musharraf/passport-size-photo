@@ -64,49 +64,11 @@ function expect(actual) {
 }
 
 // ==========================================
-// CRYPTOGRAPHY LICENSE CRYPTO SETUP
+// LICENCE: tests import the shipped module, not a copy of it
 // ==========================================
-const SALT = process.env.LICENSE_SECRET_SALT || 'Musharraf_709121SaltKey';
-const KEY = crypto.createHash('sha256').update(SALT).digest();
-
-function generateLicenseKey(machineId, expiryDate) {
-  const cleanMachineId = machineId.trim().toLowerCase();
-  const payload = `${cleanMachineId}|${expiryDate}`;
-  
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', KEY, iv);
-  
-  let encrypted = cipher.update(payload, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  
-  const licenseKey = iv.toString('hex') + encrypted;
-  return licenseKey.toLowerCase();
-}
-
-function decryptLicenseKey(licenseKey) {
-  const cleanKey = licenseKey.replace(/[^0-9a-fA-F]/g, '').toLowerCase();
-  if (cleanKey.length <= 32) {
-    throw new Error('Invalid license key format');
-  }
-  const ivHex = cleanKey.substring(0, 32);
-  const encryptedHex = cleanKey.substring(32);
-  
-  const iv = Buffer.from(ivHex, 'hex');
-  const decipher = crypto.createDecipheriv('aes-256-cbc', KEY, iv);
-  
-  let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  
-  const parts = decrypted.split('|');
-  if (parts.length < 2) {
-    throw new Error('Decrypted payload does not contain separator');
-  }
-  
-  return {
-    machineId: parts[0],
-    expirationDate: parts.slice(1).join('|'),
-  };
-}
+const license = require('../electron/license');
+const testKeys = crypto.generateKeyPairSync('ed25519'); // ephemeral; never the real signing key
+const DAY = 86400000;
 
 // ==========================================
 // 4R GRID SIZING LOGIC REFERENCE
@@ -181,26 +143,59 @@ function getGridSpecs({ preset, paperSize, paperOrientation, photoCount, spacing
 // TEST EXECUTION
 // ==========================================
 
-describe('License Key Cryptography Module', () => {
-  it('should encrypt and decrypt a license key successfully', () => {
-    const machineId = 'f34023bd-b09e-4e4a-b5e1-88df55cc8210';
-    const expiryDate = '2028-12-31';
+describe('Licence keys (Ed25519) and offline rules', () => {
+  const machineId = 'F34023BD-b09e-4e4a-b5e1-88df55cc8210';
+  const now = Date.parse('2027-01-01T00:00:00Z');
+  const future = '2028-12-31T00:00:00.000Z';
+  const sign = (id, exp) => license.signKey(id, exp, testKeys.privateKey);
+  const evalWith = (settings, extra = {}) =>
+    license.evaluate({ settings, machineId, now, publicKey: testKeys.publicKey, ...extra });
+  const synced = { lastSyncTime: new Date(now - DAY).toISOString() };
 
-    const key = generateLicenseKey(machineId, expiryDate);
-    expect(key).toBeDefined();
-
-    const decrypted = decryptLicenseKey(key);
-    expect(decrypted.machineId).toBe(machineId);
-    expect(decrypted.expirationDate).toBe(expiryDate);
+  it('accepts a genuine key for this machine (case-insensitive id)', () => {
+    expect(license.verifyKey(sign(machineId, future), machineId.toLowerCase(), testKeys.publicKey).expiryDate).toBe(future);
   });
 
-  it('should throw an error for invalid key sizes', () => {
-    expect(() => decryptLicenseKey('short_key')).toThrow(/format/);
+  it('rejects a key signed by anyone else (the old hardcoded-secret hole)', () => {
+    const forger = crypto.generateKeyPairSync('ed25519').privateKey;
+    expect(() => license.verifyKey(license.signKey(machineId, future, forger), machineId, testKeys.publicKey)).toThrow(/signature/);
   });
 
-  it('should throw decryption error for tampered key data', () => {
-    const corruptedKey = 'a'.repeat(64); // 64 hex characters (valid format but random text)
-    expect(() => decryptLicenseKey(corruptedKey)).toThrow();
+  it('rejects a key for another machine, a tampered payload and junk', () => {
+    expect(() => license.verifyKey(sign('other-pc', future), machineId, testKeys.publicKey)).toThrow(/different Machine/);
+    const [, sig] = sign(machineId, future).split('.');
+    const forgedPayload = Buffer.from(`${machineId.toLowerCase()}|2099-01-01`).toString('base64url');
+    expect(() => license.verifyKey(`${forgedPayload}.${sig}`, machineId, testKeys.publicKey)).toThrow(/signature/);
+    expect(() => license.verifyKey('a'.repeat(64), machineId, testKeys.publicKey)).toThrow(/format/);
+  });
+
+  it('rejects legacy AES keys and the real embedded key rejects test-signed keys', () => {
+    expect(evalWith({ ...synced, licenseKey: '0123456789abcdef'.repeat(6) }).status).toBe('NONE');
+    expect(() => license.verifyKey(sign(machineId, future), machineId)).toThrow(/signature/);
+  });
+
+  it('VALID within the offline window, EXPIRED past expiry or after 14 offline days', () => {
+    expect(evalWith({ ...synced, licenseKey: sign(machineId, future) }).status).toBe('VALID');
+    expect(evalWith({ ...synced, licenseKey: sign(machineId, '2026-06-01T00:00:00Z') }).status).toBe('EXPIRED');
+    const stale = { lastSyncTime: new Date(now - 15 * DAY).toISOString(), licenseKey: sign(machineId, future) };
+    expect(evalWith(stale).error.includes('Internet check-in')).toBe(true);
+  });
+
+  it('a missing or future lastSyncTime cannot switch the offline limit off', () => {
+    expect(evalWith({ licenseKey: sign(machineId, future) }).status).toBe('EXPIRED');
+    expect(evalWith({ licenseKey: sign(machineId, future), lastSyncTime: '2099-01-01T00:00:00Z' }).status).toBe('EXPIRED');
+  });
+
+  it('detects the clock being rolled back', () => {
+    const r = evalWith({ ...synced, licenseKey: sign(machineId, future), lastSeenTime: new Date(now + DAY).toISOString() });
+    expect(r.error.includes('clock')).toBe(true);
+  });
+
+  it('trial: valid for 7 days, then expired; tampered blob rejected', () => {
+    const blob = (startMs) => license.encryptTrialDate(new Date(startMs).toISOString(), machineId);
+    expect(evalWith({}, { trialBlob: blob(now - 2 * DAY) }).daysRemaining).toBe(5);
+    expect(evalWith({}, { trialBlob: blob(now - 8 * DAY) }).status).toBe('EXPIRED');
+    expect(evalWith({}, { trialBlob: 'f'.repeat(64) }).error.includes('tampered')).toBe(true);
   });
 });
 

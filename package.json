@@ -1,6 +1,6 @@
 {
   "name": "passport-photo-generator",
-  "version": "1.0.01",
+  "version": "1.1.0",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
@@ -16,7 +16,8 @@
     "android:build": "npm run build && npx cap sync android && cd android && .\\gradlew.bat assembleDebug",
     "android:run": "npx cap run android",
     "download-bg-models": "node scripts/download-bg-models.js",
-    "download-face-models": "node scripts/download-models.js"
+    "download-face-models": "node scripts/download-models.js",
+    "release": "npm run electron:build -- --publish always"
   },
   "build": {
     "appId": "com.passportphoto.generator",
@@ -39,7 +40,14 @@
     "linux": {
       "target": "AppImage",
       "icon": "public/icon.png"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "md-musharraf",
+        "repo": "passport-size-photo"
+      }
+    ]
   },
   "dependencies": {
     "@capacitor/android": "^8.5.3",
@@ -47,6 +55,7 @@
     "@imgly/background-removal": "^1.7.0",
     "@mediapipe/tasks-vision": "1.0.1",
     "@types/sharp": "^0.31.1",
+    "electron-updater": "^6.8.9",
     "jspdf": "^4.2.1",
     "lucide-react": "^1.59.0",
     "next": "16.2.7",

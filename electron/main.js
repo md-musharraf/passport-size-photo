@@ -2,9 +2,8 @@ const { app, BrowserWindow, ipcMain, protocol, net, nativeTheme } = require('ele
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const crypto = require('crypto');
 const { execSync } = require('child_process');
-const { pathToFileURL } = require('url');
+const { verifyKey, evaluate, encryptTrialDate, TRIAL_DAYS } = require('./license');
 
 // Register 'app' scheme as privileged before 'ready'
 protocol.registerSchemesAsPrivileged([
@@ -21,8 +20,9 @@ protocol.registerSchemesAsPrivileged([
   }
 ]);
 
-const SALT = process.env.LICENSE_SECRET_SALT || 'Musharraf_709121SaltKey';
-const KEY = crypto.createHash('sha256').update(SALT).digest();
+// Baked in: letting users repoint the licence server let a fake server
+// "approve" a paused licence. The env override only works in dev builds.
+const DASHBOARD_URL = (!app.isPackaged && process.env.ADMIN_DASHBOARD_URL) || 'https://adminphotomanagement.vercel.app';
 
 const settingsPath = path.join(app.getPath('userData'), 'settings.json');
 const trialPath = path.join(app.getPath('userData'), 'trial.json');
@@ -30,193 +30,98 @@ const systemTrialPath = path.join(os.homedir(), '.passport_photo_trial');
 
 let mainWindow;
 
-// Fetch unique system hardware UUID
+const readJson = (p) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; } };
+const readSettings = () => readJson(settingsPath) || {};
+const writeSettings = (s) => fs.writeFileSync(settingsPath, JSON.stringify(s, null, 2));
+const readTrial = () => {
+  const local = readJson(trialPath)?.encryptedDate;
+  if (local) return local;
+  try { return fs.readFileSync(systemTrialPath, 'utf8').trim() || null; } catch { return null; }
+};
+
+// Hardware UUID. It never changes, so resolve it once (it used to shell out on every poll).
+let machineIdCache;
 function getMachineId() {
+  if (machineIdCache) return machineIdCache;
   try {
     if (process.platform === 'win32') {
-      const output = execSync('reg query HKLM\\Software\\Microsoft\\Cryptography /v MachineGuid').toString();
-      const match = output.match(/MachineGuid\s+REG_SZ\s+(\S+)/);
-      if (match) return match[1].trim();
-    }
-    if (process.platform === 'darwin') {
-      const output = execSync("ioreg -rd1 -c IOPlatformExpertDevice | grep -i 'UUID'").toString();
-      const match = output.match(/"IOPlatformUUID"\s+=\s+"([^"]+)"/);
-      if (match) return match[1].trim();
-    }
-    if (process.platform === 'linux') {
-      if (fs.existsSync('/var/lib/dbus/machine-id')) {
-        return fs.readFileSync('/var/lib/dbus/machine-id', 'utf8').trim();
-      }
-      if (fs.existsSync('/etc/machine-id')) {
-        return fs.readFileSync('/etc/machine-id', 'utf8').trim();
-      }
+      machineIdCache = execSync('reg query HKLM\\Software\\Microsoft\\Cryptography /v MachineGuid').toString().match(/MachineGuid\s+REG_SZ\s+(\S+)/)?.[1];
+    } else if (process.platform === 'darwin') {
+      machineIdCache = execSync("ioreg -rd1 -c IOPlatformExpertDevice | grep -i 'UUID'").toString().match(/"IOPlatformUUID"\s+=\s+"([^"]+)"/)?.[1];
+    } else {
+      machineIdCache = ['/var/lib/dbus/machine-id', '/etc/machine-id']
+        .map((f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } })
+        .find(Boolean);
     }
   } catch (e) {
     console.error('Failed to retrieve hardware UUID:', e);
   }
-  // Safe fallback
-  return os.hostname() || 'fallback-machine-id';
+  machineIdCache = (machineIdCache || os.hostname() || 'fallback-machine-id').trim();
+  return machineIdCache;
 }
 
-// Decrypt license key string (AES-256-CBC)
-function decrypt(licenseKey) {
-  const cleanKey = licenseKey.replace(/[^0-9a-fA-F]/g, '').toLowerCase();
-  if (cleanKey.length <= 32) {
-    throw new Error('Invalid license key format');
-  }
-  const ivHex = cleanKey.substring(0, 32);
-  const encryptedHex = cleanKey.substring(32);
-  
-  const iv = Buffer.from(ivHex, 'hex');
-  const decipher = crypto.createDecipheriv('aes-256-cbc', KEY, iv);
-  
-  let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  
-  const parts = decrypted.split('|');
-  if (parts.length < 2) {
-    throw new Error('Decrypted payload does not contain separator');
-  }
-  
-  return {
-    machineId: parts[0],
-    expirationDate: parts.slice(1).join('|'),
-  };
+// Ask the dashboard for this machine's status. Throws when unreachable or on an
+// unexpected reply, so a Vercel/Supabase outage counts as "offline" - it must
+// never be mistaken for "licence deleted" (any 404 used to wipe the licence).
+async function fetchRemoteStatus(machineId) {
+  const res = await net.fetch(`${DASHBOARD_URL}/api/license/status?machineId=${encodeURIComponent(machineId)}`, {
+    signal: AbortSignal.timeout(8000),
+  });
+  const body = await res.json().catch(() => null);
+  if (body?.status === 'DELETED') return { status: 'DELETED' };
+  if (res.ok && body?.success) return { status: body.status || 'ACTIVE', licenseKey: body.licenseKey };
+  throw new Error(`Dashboard replied ${res.status}`);
 }
 
-// Encrypt/Decrypt trial date locally bound to machine
-function encryptTrialDate(dateStr, machineId) {
-  const key = crypto.createHash('sha256').update(machineId + '_trial_salt').digest();
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
-  let encrypted = cipher.update(dateStr, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  return iv.toString('hex') + encrypted;
-}
+async function checkLicense({ remote = true } = {}) {
+  const machineId = getMachineId();
+  const settings = readSettings();
+  let server = 'NONE';
+  let online = false;
 
-function decryptTrialDate(encryptedStr, machineId) {
-  const key = crypto.createHash('sha256').update(machineId + '_trial_salt').digest();
-  const ivHex = encryptedStr.substring(0, 32);
-  const encryptedHex = encryptedStr.substring(32);
-  const iv = Buffer.from(ivHex, 'hex');
-  const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
-  let decrypted = decipher.update(encryptedHex, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return decrypted;
-}
-
-// Check local settings for license validity or active trial
-function checkLicenseLocal(machineId) {
-  let settings = {};
-  if (fs.existsSync(settingsPath)) {
+  if (remote) {
     try {
-      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-    } catch (e) {}
-  }
-
-  const now = new Date();
-
-  // 1. Anti-Tamper: System Clock Rollback Check
-  if (settings.lastSeenTime) {
-    const lastSeen = new Date(settings.lastSeenTime);
-    // Allow up to a 10-minute grace buffer for standard NTP time syncing drifts
-    if (now < new Date(lastSeen.getTime() - 10 * 60 * 1000)) {
-      console.error('Security alert: Local system clock rollback detected!');
-      return { 
-        status: 'EXPIRED', 
-        type: 'LICENSE', 
-        error: 'System clock manipulation detected. Please restore the correct date and time on your computer.' 
-      };
+      const r = await fetchRemoteStatus(machineId);
+      online = true;
+      server = r.status;
+      settings.lastSyncTime = new Date().toISOString();
+      if (server === 'ACTIVE' && r.licenseKey) {
+        // Auto-renew: adopt the dashboard's key if it is genuine and for this machine.
+        try { verifyKey(r.licenseKey, machineId); settings.licenseKey = r.licenseKey; } catch { /* keep ours */ }
+      }
+    } catch {
+      // Offline or dashboard down: the local key + offline grace window decide.
     }
   }
 
-  // Auto-record the last seen execution timestamp in settings
-  try {
-    settings.lastSeenTime = now.toISOString();
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-  } catch (e) {}
+  // Unregistered is normal during a trial, so DELETED only revokes an existing licence.
+  const revoked = server === 'PAUSED' || server === 'STOPPED' || (server === 'DELETED' && !!settings.licenseKey);
+  if (server === 'DELETED') delete settings.licenseKey;
 
-  // 2. License File Validation
-  if (settings.licenseKey) {
-    try {
-      const decrypted = decrypt(settings.licenseKey);
-      const decMachineId = decrypted.machineId.trim().toLowerCase();
-      const currMachineId = machineId.trim().toLowerCase();
-      const expiry = new Date(decrypted.expirationDate);
-      
-      if (decMachineId !== currMachineId) {
-        return { status: 'NONE', error: 'License key is registered for a different Machine ID' };
+  const result = revoked
+    ? {
+        status: 'EXPIRED', type: 'LICENSE', daysRemaining: 0,
+        error: server === 'DELETED'
+          ? 'This Machine ID is not registered or has been deleted from the database.'
+          : `Access blocked by administrator. License status is currently ${server}.`,
       }
+    : evaluate({ settings, trialBlob: readTrial(), machineId });
 
-      if (expiry <= now) {
-        return { status: 'EXPIRED', type: 'LICENSE', expiryDate: decrypted.expirationDate, error: 'Your subscription key validity has expired. Please renew your key.' };
-      }
+  // Never move "last seen" backwards, so rolling the clock back stays detected.
+  settings.lastSeenTime = new Date(Math.max(Date.now(), Date.parse(settings.lastSeenTime) || 0)).toISOString();
+  try { writeSettings(settings); } catch (e) { console.error('Failed to save settings:', e); }
 
-      // 3. Offline Enforced Check-in (14-Day Max Offline Window)
-      if (settings.lastSyncTime) {
-        const lastSync = new Date(settings.lastSyncTime);
-        const differenceInTime = now.getTime() - lastSync.getTime();
-        const differenceInDays = differenceInTime / (1000 * 3600 * 24);
-        
-        if (differenceInDays > 14) {
-          console.error('Security alert: Maximum offline grace period of 14 days exceeded.');
-          return { 
-            status: 'EXPIRED', 
-            type: 'LICENSE', 
-            expiryDate: decrypted.expirationDate,
-            error: 'Internet check-in required. This application has been offline for more than 14 days. Please connect to the internet to verify your subscription.' 
-          };
-        }
-      } else {
-        // Initialize lastSyncTime on legacy settings
-        try {
-          settings.lastSyncTime = now.toISOString();
-          fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-        } catch (e) {}
-      }
+  return { ...result, machineId, remote: server, online, lastSyncTime: settings.lastSyncTime || null };
+}
 
-      return { status: 'VALID', type: 'LICENSE', expiryDate: decrypted.expirationDate };
-    } catch (e) {
-      console.error('Local license verification failed:', e);
-      return { status: 'NONE', error: 'License validation error: key structure corrupt.' };
-    }
-  }
-
-  // 2. Trial Check (redundant checks)
-  let trialData = null;
-  if (fs.existsSync(trialPath)) {
-    try {
-      trialData = JSON.parse(fs.readFileSync(trialPath, 'utf8'));
-    } catch (e) {}
-  }
-  if (!trialData && fs.existsSync(systemTrialPath)) {
-    try {
-      const encryptedDate = fs.readFileSync(systemTrialPath, 'utf8').trim();
-      trialData = { encryptedDate };
-    } catch (e) {}
-  }
-
-  if (trialData && trialData.encryptedDate) {
-    try {
-      const dateStr = decryptTrialDate(trialData.encryptedDate, machineId);
-      const trialStartDate = new Date(dateStr);
-      const now = new Date();
-      const differenceInTime = now.getTime() - trialStartDate.getTime();
-      const differenceInDays = differenceInTime / (1000 * 3600 * 24);
-      
-      if (differenceInDays >= 0 && differenceInDays <= 7) {
-        const daysRemaining = Math.max(0, 7 - Math.floor(differenceInDays));
-        return { status: 'VALID', type: 'TRIAL', trialStartDate: dateStr, daysRemaining };
-      } else {
-        return { status: 'EXPIRED', type: 'TRIAL', error: 'Trial expired' };
-      }
-    } catch (e) {
-      console.error('Trial date decryption failed (tampered?):', e);
-      return { status: 'EXPIRED', type: 'TRIAL', error: 'Trial data tampered or corrupt' };
-    }
-  }
-
-  return { status: 'NONE', error: 'No license key or trial active' };
+// Background updates from GitHub Releases (electron-updater): downloads quietly,
+// shows an OS notification, installs on next quit. Packaged builds only.
+function startAutoUpdates() {
+  if (!app.isPackaged) return;
+  const { autoUpdater } = require('electron-updater');
+  const check = () => autoUpdater.checkForUpdatesAndNotify().catch((e) => console.warn('[updater]', e.message));
+  check();
+  setInterval(check, 6 * 60 * 60 * 1000);
 }
 
 function createWindow() {
@@ -231,7 +136,9 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
-      webSecurity: false
+      webSecurity: false,
+      // No DevTools in shipped builds: they allowed poking the licence bridge.
+      devTools: !app.isPackaged
     },
     icon: path.join(__dirname, '../public/icon.png'),
     show: false,
@@ -286,7 +193,9 @@ app.whenReady().then(() => {
     try {
       const url = new URL(request.url);
       let filePath = decodeURIComponent(url.pathname);
-      
+      // Decoding happens after URL normalisation, so "..%2F" would escape out/.
+      if (filePath.split(/[\\/]/).includes('..')) return new Response('Forbidden', { status: 403 });
+
       // Default to index.html for root or empty path
       if (filePath === '/' || filePath === '') {
         filePath = '/index.html';
@@ -339,169 +248,37 @@ app.whenReady().then(() => {
     }
   });
 
-  // Machine ID IPC
-  ipcMain.handle('get-machine-id', async () => {
-    return getMachineId();
-  });
+  ipcMain.handle('license-check', (_e, opts) => checkLicense(opts));
 
-  // License check IPC
-  ipcMain.handle('license-check', async () => {
-    const machineId = getMachineId();
-    return checkLicenseLocal(machineId);
-  });
-
-  // License activate IPC
-  ipcMain.handle('license-activate', async (event, licenseKey) => {
-    const machineId = getMachineId();
+  ipcMain.handle('license-activate', async (_e, licenseKey) => {
     try {
-      const decrypted = decrypt(licenseKey);
-      const decMachineId = decrypted.machineId.trim().toLowerCase();
-      const currMachineId = machineId.trim().toLowerCase();
-      const expiry = new Date(decrypted.expirationDate);
-      
-      if (decMachineId !== currMachineId) {
-        return { success: false, error: 'License key is registered for a different Machine ID' };
-      }
-      
-      if (expiry <= new Date()) {
-        return { success: false, error: 'License key has expired' };
-      }
-      
-      // Save license locally while preserving other settings
-      let settings = {};
-      if (fs.existsSync(settingsPath)) {
-        try {
-          settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-        } catch (e) {}
-      }
-      settings.licenseKey = licenseKey;
-      settings.lastSyncTime = new Date().toISOString(); // Start the 14-day grace window upon successful activation
-      settings.lastSeenTime = new Date().toISOString();
-      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-      return { success: true, expiryDate: decrypted.expirationDate };
+      const { expiryDate } = verifyKey(licenseKey, getMachineId());
+      if (Date.parse(expiryDate) <= Date.now()) return { success: false, error: 'License key has expired' };
+      // Activation starts the offline grace window.
+      writeSettings({ ...readSettings(), licenseKey: String(licenseKey).trim(), lastSyncTime: new Date().toISOString() });
+      return { success: true, expiryDate };
     } catch (e) {
-      console.error('Failed to activate license:', e);
-      return { success: false, error: 'Invalid license key structure or corrupt payload' };
-    }
-  });
-
-  // Record successful online sync IPC handler
-  ipcMain.handle('record-sync', async () => {
-    try {
-      if (fs.existsSync(settingsPath)) {
-        const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-        const nowStr = new Date().toISOString();
-        settings.lastSyncTime = nowStr;
-        settings.lastSeenTime = nowStr;
-        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-      }
-      return { success: true };
-    } catch (e) {
-      console.error('Failed to record sync in settings:', e);
-      return { success: false };
-    }
-  });
-
-  // Get remote admin dashboard URL IPC
-  ipcMain.handle('get-dashboard-url', async () => {
-    let dashboardUrl = process.env.NEXT_PUBLIC_ADMIN_DASHBOARD_URL || 'https://adminphotomanagement.vercel.app';
-    try {
-      if (fs.existsSync(settingsPath)) {
-        const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-        if (settings.dashboardUrl) {
-          dashboardUrl = settings.dashboardUrl;
-        }
-      }
-    } catch (e) {
-      console.error('Failed to read dashboardUrl from settings:', e);
-    }
-    return dashboardUrl;
-  });
-
-  // Save remote admin dashboard URL IPC
-  ipcMain.handle('save-dashboard-url', async (event, url) => {
-    try {
-      let settings = {};
-      if (fs.existsSync(settingsPath)) {
-        try {
-          settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-        } catch (e) {}
-      }
-      settings.dashboardUrl = url;
-      settings.dashboardUrlConfigured = true; // Mark as explicitly configured
-      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-      return { success: true };
-    } catch (e) {
-      console.error('Failed to save dashboardUrl to settings:', e);
       return { success: false, error: e.message };
     }
   });
 
-  // Check if dashboard URL has been explicitly configured
-  ipcMain.handle('is-dashboard-configured', async () => {
-    try {
-      if (fs.existsSync(settingsPath)) {
-        const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-        return { configured: !!settings.dashboardUrlConfigured };
-      }
-    } catch (e) {}
-    return { configured: false };
-  });
-
-  // Request free trial IPC
   ipcMain.handle('license-request-trial', async () => {
-    const machineId = getMachineId();
-    
-    // Check if trial has already been claimed on this system
     if (fs.existsSync(trialPath) || fs.existsSync(systemTrialPath)) {
       return { success: false, error: 'Trial has already been claimed on this machine.' };
     }
-    
     try {
-      const trialStartDateStr = new Date().toISOString();
-      const encryptedDate = encryptTrialDate(trialStartDateStr, machineId);
-      
-      // Write locally
+      const encryptedDate = encryptTrialDate(new Date().toISOString(), getMachineId());
       fs.writeFileSync(trialPath, JSON.stringify({ encryptedDate }, null, 2));
       fs.writeFileSync(systemTrialPath, encryptedDate);
-      
-      return { success: true, daysRemaining: 7 };
+      return { success: true, daysRemaining: TRIAL_DAYS };
     } catch (e) {
       console.error('Failed to create trial key:', e);
       return { success: false, error: 'Failed to initialize trial' };
     }
   });
 
-  // Wipe local license key IPC — preserves dashboardUrl and other settings
-  ipcMain.handle('license-wipe', async () => {
-    try {
-      // Clear licenseKey from settings.json WITHOUT deleting the whole file
-      // (settings.json also stores dashboardUrl which must be preserved)
-      if (fs.existsSync(settingsPath)) {
-        try {
-          const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-          delete settings.licenseKey;
-          fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-        } catch (e) {
-          // If settings file is corrupted, delete it entirely as fallback
-          fs.unlinkSync(settingsPath);
-        }
-      }
-      if (fs.existsSync(trialPath)) {
-        fs.unlinkSync(trialPath);
-      }
-      if (fs.existsSync(systemTrialPath)) {
-        fs.unlinkSync(systemTrialPath);
-      }
-      return { success: true };
-    } catch (e) {
-      console.error('Failed to wipe local license settings:', e);
-      return { success: false, error: 'Failed to wipe local settings' };
-    }
-  });
-
-
   createWindow();
+  startAutoUpdates();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -515,4 +292,3 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
-
