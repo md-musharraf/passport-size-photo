@@ -152,6 +152,8 @@ function createWindow() {
     // Match the app theme so there is no white flash before the first paint.
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#121418' : '#EEF0F3'
   });
+  // No File/Edit/View/Window bar on Windows/Linux; the app has its own toolbar.
+  mainWindow.removeMenu();
 
   // Development mode vs Production mode
   if (!app.isPackaged && (process.env.NODE_ENV === 'development' || !process.env.NODE_ENV)) {
